@@ -209,7 +209,7 @@ body {
   margin-top: 0.8rem;
   display: grid;
   gap: 0.7rem;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .metric-card {
@@ -322,6 +322,12 @@ h2 {
   padding: 0.5rem;
 }
 
+.file-upload-label {
+  font-size: 0.82rem;
+  color: #d1f7e6;
+  margin-right: 0.15rem;
+}
+
 .file-input {
   position: absolute;
   width: 1px;
@@ -349,7 +355,12 @@ h2 {
 
 .bowler-search-input {
   width: min(420px, 100%);
-  margin-top: 0.65rem;
+}
+
+.bowlers-toolbar {
+  gap: 0.65rem;
+  margin-bottom: 0.65rem;
+  padding-bottom: 0.3rem;
 }
 
 label {
@@ -620,6 +631,44 @@ thead th {
   gap: 0.5rem;
 }
 
+.check-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.check-label input[type="checkbox"] {
+  width: auto;
+  accent-color: #2fce91;
+}
+
+.inline-stepper {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.mode-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.mode-btn {
+  background: rgba(77, 184, 142, 0.16);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #d9ffed;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.8rem;
+}
+
+.mode-btn.is-selected {
+  background: linear-gradient(90deg, var(--accent), #2fce91);
+  border-color: rgba(113, 246, 181, 0.5);
+  color: #ffffff;
+}
+
 .refund-modal-card {
   width: min(560px, 100%);
 }
@@ -681,7 +730,7 @@ thead th {
 
 @media (max-width: 1220px) {
   .metric-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 

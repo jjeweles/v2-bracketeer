@@ -10,6 +10,10 @@ type Bowler = {
   handicap_value: number;
   scratch_entries: number;
   handicap_entries: number;
+  pay_later: number;
+  all_brackets: number;
+  all_brackets_count: number;
+  all_brackets_mode: "off" | "both" | "scratch" | "handicap";
 };
 
 type Session = {
@@ -47,11 +51,17 @@ const getSessionStmt = db.query(
   `SELECT id, name, entry_fee_cents, handicap_percent, handicap_base, payout_first_cents, payout_second_cents, is_completed, completed_at FROM sessions WHERE id = ?`
 );
 const getBowlersStmt = db.query(
-  `SELECT id, session_id, name, average, handicap_value, scratch_entries, handicap_entries FROM bowlers WHERE session_id = ? ORDER BY id`
+  `SELECT id, session_id, name, average, handicap_value, scratch_entries, handicap_entries, pay_later, all_brackets, all_brackets_count, all_brackets_mode
+   FROM bowlers WHERE session_id = ? ORDER BY id`
 );
 const getBowlerStmt = db.query(
-  `SELECT id, session_id, name, average, handicap_value, scratch_entries, handicap_entries FROM bowlers WHERE id = ? AND session_id = ?`
+  `SELECT id, session_id, name, average, handicap_value, scratch_entries, handicap_entries, pay_later, all_brackets, all_brackets_count, all_brackets_mode
+   FROM bowlers WHERE id = ? AND session_id = ?`
 );
+
+function normalizeAllBracketsMode(mode: unknown): "off" | "both" | "scratch" | "handicap" {
+  return mode === "both" || mode === "scratch" || mode === "handicap" ? mode : "off";
+}
 
 function calculateHandicap(average: number, percent: number, base: number): number {
   const raw = ((base - average) * percent) / 100;
@@ -69,6 +79,10 @@ function toDisplayName(fullName: string): string {
 
 function compareDisplayNames(a: string, b: string): number {
   return a.localeCompare(b, undefined, { sensitivity: "base" });
+}
+
+function allModeAppliesToKind(mode: Bowler["all_brackets_mode"], kind: BracketKind): boolean {
+  return mode === "both" || mode === kind;
 }
 
 export function listSessions() {
@@ -126,6 +140,9 @@ export function addBowler(
     average: number;
     scratchEntries: number;
     handicapEntries: number;
+    payLater?: boolean;
+    allBracketsMode?: "off" | "both" | "scratch" | "handicap";
+    allBracketsCount?: number;
   }
 ) {
   const session = assertSessionEditable(sessionId);
@@ -133,9 +150,12 @@ export function addBowler(
   const handicapValue = calculateHandicap(input.average, session.handicap_percent, session.handicap_base);
 
   const stmt = db.query(
-    `INSERT INTO bowlers (session_id, name, average, handicap_value, scratch_entries, handicap_entries)
-     VALUES (?, ?, ?, ?, ?, ?) RETURNING *`
+    `INSERT INTO bowlers (session_id, name, average, handicap_value, scratch_entries, handicap_entries, pay_later, all_brackets, all_brackets_count, all_brackets_mode)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`
   );
+  const allBracketsMode = normalizeAllBracketsMode(input.allBracketsMode);
+  const allBracketsCount = allBracketsMode === "off" ? 0 : Math.max(1, Number(input.allBracketsCount ?? 1));
+  const allBrackets = allBracketsMode === "off" ? 0 : 1;
 
   return stmt.get(
     sessionId,
@@ -143,7 +163,11 @@ export function addBowler(
     input.average,
     handicapValue,
     input.scratchEntries,
-    input.handicapEntries
+    input.handicapEntries,
+    input.payLater ? 1 : 0,
+    allBrackets,
+    allBracketsCount,
+    allBracketsMode
   );
 }
 
@@ -162,7 +186,9 @@ function uniqueSessionName(baseName: string): string {
     return base;
   }
 
-  const dated = `${base} - ${dateSuffix()}`;
+  const baseWithoutCounter = base.replace(/\s\(\d+\)$/, "");
+  const alreadyDated = /\s-\s\d{4}-\d{2}-\d{2}$/.test(baseWithoutCounter);
+  const dated = alreadyDated ? baseWithoutCounter : `${baseWithoutCounter} - ${dateSuffix()}`;
   if (!exists.get(dated)) {
     return dated;
   }
@@ -193,6 +219,9 @@ export function cloneSessionFromExisting(sessionId: number, name?: string) {
       average: bowler.average,
       scratchEntries: 0,
       handicapEntries: 0,
+      payLater: false,
+      allBracketsMode: "off",
+      allBracketsCount: 0,
     });
   }
 
@@ -213,6 +242,9 @@ export function updateBowler(
     average?: number;
     scratchEntries?: number;
     handicapEntries?: number;
+    payLater?: boolean;
+    allBracketsMode?: "off" | "both" | "scratch" | "handicap";
+    allBracketsCount?: number;
   }
 ) {
   const session = assertSessionEditable(sessionId);
@@ -226,12 +258,21 @@ export function updateBowler(
   const nextAverage = input.average == null ? bowler.average : input.average;
   const nextScratchEntries = input.scratchEntries == null ? bowler.scratch_entries : input.scratchEntries;
   const nextHandicapEntries = input.handicapEntries == null ? bowler.handicap_entries : input.handicapEntries;
+  const nextPayLater = input.payLater == null ? bowler.pay_later : input.payLater ? 1 : 0;
+  const nextAllMode = input.allBracketsMode == null ? bowler.all_brackets_mode : normalizeAllBracketsMode(input.allBracketsMode);
+  const nextAllBrackets = nextAllMode === "off" ? 0 : 1;
+  const nextAllBracketsCount =
+    nextAllMode === "off"
+      ? 0
+      : input.allBracketsCount == null
+      ? Math.max(1, bowler.all_brackets_count || 1)
+      : Math.max(1, Number(input.allBracketsCount));
   const handicapValue = calculateHandicap(nextAverage, session.handicap_percent, session.handicap_base);
 
   const updated = db
     .query(
       `UPDATE bowlers
-       SET name = ?, average = ?, handicap_value = ?, scratch_entries = ?, handicap_entries = ?
+       SET name = ?, average = ?, handicap_value = ?, scratch_entries = ?, handicap_entries = ?, pay_later = ?, all_brackets = ?, all_brackets_count = ?, all_brackets_mode = ?
        WHERE id = ? AND session_id = ?
        RETURNING *`
     )
@@ -241,6 +282,10 @@ export function updateBowler(
       handicapValue,
       nextScratchEntries,
       nextHandicapEntries,
+      nextPayLater,
+      nextAllBrackets,
+      nextAllBracketsCount,
+      nextAllMode,
       bowlerId,
       sessionId
     ) as Bowler | null;
@@ -301,6 +346,20 @@ export function setPayoutPaid(sessionId: number, bowlerId: number, paid: boolean
     ).run(sessionId, bowlerId);
   } else {
     db.query(`DELETE FROM payout_payments WHERE session_id = ? AND bowler_id = ?`).run(sessionId, bowlerId);
+  }
+  return getSessionSnapshot(sessionId);
+}
+
+export function setOwedPaid(sessionId: number, bowlerId: number, paid: boolean) {
+  assertSessionEditable(sessionId);
+  if (paid) {
+    db.query(
+      `INSERT INTO owed_payments (session_id, bowler_id)
+       VALUES (?, ?)
+       ON CONFLICT(session_id, bowler_id) DO UPDATE SET paid_at = datetime('now')`
+    ).run(sessionId, bowlerId);
+  } else {
+    db.query(`DELETE FROM owed_payments WHERE session_id = ? AND bowler_id = ?`).run(sessionId, bowlerId);
   }
   return getSessionSnapshot(sessionId);
 }
@@ -389,15 +448,42 @@ export function generateBrackets(sessionId: number) {
   db.transaction(() => {
     db.query(`DELETE FROM refund_payments WHERE session_id = ?`).run(sessionId);
     db.query(`DELETE FROM payout_payments WHERE session_id = ?`).run(sessionId);
+    db.query(`DELETE FROM owed_payments WHERE session_id = ?`).run(sessionId);
     db.query(`DELETE FROM refunds WHERE session_id = ?`).run(sessionId);
     db.query(`DELETE FROM bracket_slots WHERE bracket_id IN (SELECT id FROM brackets WHERE session_id = ?)`).run(sessionId);
     db.query(`DELETE FROM brackets WHERE session_id = ?`).run(sessionId);
 
     for (const kind of ["scratch", "handicap"] as const) {
+      const forcedAll = bowlers.filter((bowler) => allModeAppliesToKind(bowler.all_brackets_mode, kind));
       const counts = new Map<number, number>();
-      for (const bowler of bowlers) {
-        const count = kind === "scratch" ? bowler.scratch_entries : bowler.handicap_entries;
-        counts.set(bowler.id, Math.max(0, count));
+
+      if (forcedAll.length > 0 && forcedAll.length < 8) {
+        const slotsPerBracket = 8 - forcedAll.length;
+        let nonAllTotalEntries = 0;
+
+        for (const bowler of bowlers) {
+          if (allModeAppliesToKind(bowler.all_brackets_mode, kind)) {
+            continue;
+          }
+          const configuredCount = kind === "scratch" ? bowler.scratch_entries : bowler.handicap_entries;
+          const normalized = Math.max(0, configuredCount);
+          counts.set(bowler.id, normalized);
+          nonAllTotalEntries += normalized;
+        }
+
+        const bracketCount = Math.max(0, Math.floor(nonAllTotalEntries / slotsPerBracket));
+        for (const bowler of forcedAll) {
+          counts.set(bowler.id, bracketCount);
+        }
+      } else {
+        for (const bowler of bowlers) {
+          const configuredCount = kind === "scratch" ? bowler.scratch_entries : bowler.handicap_entries;
+          let count = configuredCount;
+          if (allModeAppliesToKind(bowler.all_brackets_mode, kind)) {
+            count = 1;
+          }
+          counts.set(bowler.id, Math.max(0, count));
+        }
       }
 
       const { brackets, leftovers } = buildEightManGroups(counts);
@@ -782,12 +868,34 @@ export function getSessionSnapshot(sessionId: number) {
     }
   }
 
+  const scratchBracketCount = bracketSnapshots.filter((bracket) => bracket.kind === "scratch").length;
+  const handicapBracketCount = bracketSnapshots.filter((bracket) => bracket.kind === "handicap").length;
+
+  const grossOwedByBowler = new Map<number, number>();
+  for (const bowler of bowlers) {
+    if (!bowler.pay_later) continue;
+    const scratchEntries =
+      bowler.all_brackets_mode === "both" || bowler.all_brackets_mode === "scratch"
+        ? scratchBracketCount
+        : bowler.scratch_entries;
+    const handicapEntries =
+      bowler.all_brackets_mode === "both" || bowler.all_brackets_mode === "handicap"
+        ? handicapBracketCount
+        : bowler.handicap_entries;
+    const grossOwedCents = Math.max(0, scratchEntries + handicapEntries) * session.entry_fee_cents;
+    grossOwedByBowler.set(bowler.id, grossOwedCents);
+  }
+
   const payoutTotals = [...payoutTotalsMap.entries()]
-    .map(([bowlerId, amountCents]) => ({
-      bowlerId,
-      name: displayNameById.get(bowlerId) ?? `#${bowlerId}`,
-      amountCents,
-    }))
+    .map(([bowlerId, amountCents]) => {
+      const netAmountCents = Math.max(0, amountCents - (grossOwedByBowler.get(bowlerId) ?? 0));
+      return {
+        bowlerId,
+        name: displayNameById.get(bowlerId) ?? `#${bowlerId}`,
+        amountCents: netAmountCents,
+      };
+    })
+    .filter((row) => row.amountCents > 0)
     .sort((a, b) => compareDisplayNames(a.name, b.name));
 
   const paidRefundBowlerIds = new Set(
@@ -804,6 +912,13 @@ export function getSessionSnapshot(sessionId: number) {
         .all(sessionId) as { bowler_id: number }[]
     ).map((row) => row.bowler_id)
   );
+  const paidOwedBowlerIds = new Set(
+    (
+      db
+        .query(`SELECT bowler_id FROM owed_payments WHERE session_id = ?`)
+        .all(sessionId) as { bowler_id: number }[]
+    ).map((row) => row.bowler_id)
+  );
 
   const refundsOutstandingCents = refundTotals.reduce((acc, row) => {
     return acc + (paidRefundBowlerIds.has(row.bowlerId) ? 0 : row.amountCents);
@@ -811,12 +926,44 @@ export function getSessionSnapshot(sessionId: number) {
   const payoutsOutstandingCents = payoutTotals.reduce((acc, row) => {
     return acc + (paidPayoutBowlerIds.has(row.bowlerId) ? 0 : row.amountCents);
   }, 0);
+
+  const payoutByBowler = payoutTotalsMap;
+  const owedTotals = bowlers
+    .filter((bowler) => bowler.pay_later)
+    .map((bowler) => {
+      const scratchEntries =
+        bowler.all_brackets_mode === "both" || bowler.all_brackets_mode === "scratch"
+          ? scratchBracketCount
+          : bowler.scratch_entries;
+      const handicapEntries =
+        bowler.all_brackets_mode === "both" || bowler.all_brackets_mode === "handicap"
+          ? handicapBracketCount
+          : bowler.handicap_entries;
+      const grossOwedCents = Math.max(0, scratchEntries + handicapEntries) * session.entry_fee_cents;
+      const payoutCreditCents = payoutByBowler.get(bowler.id) ?? 0;
+      const netOwedCents = Math.max(0, grossOwedCents - payoutCreditCents);
+      return {
+        bowlerId: bowler.id,
+        name: displayNameById.get(bowler.id) ?? toDisplayName(bowler.name),
+        grossOwedCents,
+        payoutCreditCents,
+        netOwedCents,
+        isPaid: paidOwedBowlerIds.has(bowler.id),
+      };
+    })
+    .sort((a, b) => compareDisplayNames(a.name, b.name));
+
+  const owedOutstandingCents = owedTotals.reduce((acc, row) => {
+    return acc + (row.isPaid || row.netOwedCents === 0 ? 0 : row.netOwedCents);
+  }, 0);
+
   const scoringComplete =
     bracketSnapshots.length > 0 &&
     bracketSnapshots.every((bracket) =>
       bracket.rounds.every((round) => round.matches.every((match) => match.status === "complete"))
     );
-  const canComplete = scoringComplete && refundsOutstandingCents === 0 && payoutsOutstandingCents === 0;
+  const canComplete =
+    scoringComplete && refundsOutstandingCents === 0 && payoutsOutstandingCents === 0 && owedOutstandingCents === 0;
 
   return {
     session,
@@ -828,11 +975,14 @@ export function getSessionSnapshot(sessionId: number) {
     payoutTotals,
     paidRefundBowlerIds: [...paidRefundBowlerIds],
     paidPayoutBowlerIds: [...paidPayoutBowlerIds],
+    owedTotals,
+    paidOwedBowlerIds: [...paidOwedBowlerIds],
     completion: {
       canComplete,
       scoringComplete,
       refundsOutstandingCents,
       payoutsOutstandingCents,
+      owedOutstandingCents,
     },
     requiredScorersByGame: {
       game1: sortedBowlerRows(requiredGame1),
@@ -850,12 +1000,13 @@ export function completeSession(sessionId: number) {
       scoringComplete: boolean;
       refundsOutstandingCents: number;
       payoutsOutstandingCents: number;
+      owedOutstandingCents: number;
     };
   };
 
   if (!snapshot.completion.canComplete) {
     throw new Error(
-      `Session cannot be completed yet (scoringComplete=${snapshot.completion.scoringComplete}, refundsOutstanding=${snapshot.completion.refundsOutstandingCents}, payoutsOutstanding=${snapshot.completion.payoutsOutstandingCents})`
+      `Session cannot be completed yet (scoringComplete=${snapshot.completion.scoringComplete}, refundsOutstanding=${snapshot.completion.refundsOutstandingCents}, payoutsOutstanding=${snapshot.completion.payoutsOutstandingCents}, owedOutstanding=${snapshot.completion.owedOutstandingCents})`
     );
   }
 
