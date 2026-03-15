@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.justinjewell.v2bracketeer",
   "build": {
-    "beforeDevCommand": "bun run dev",
-    "devUrl": "http://127.0.0.1:3000",
-    "beforeBuildCommand": "echo \"No frontend build configured\"",
+    "beforeDevCommand": "bun run dev:desktop",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeBuildCommand": "bun run ui:build",
     "frontendDist": "../src/public"
   },
   "app": {

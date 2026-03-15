@@ -8,7 +8,7 @@ import {
   getSessionSnapshot,
   listBowlers,
   listSessions,
-  updateBowlerAverage,
+  updateBowler,
   upsertGameScores,
 } from "./lib/engine";
 import "./lib/db";
@@ -129,11 +129,45 @@ Bun.serve({
         const bowlerId = parseBowlerId(pathname);
         if (!sessionId || !bowlerId) return badRequest("Invalid session or bowler id");
         const body = await req.json();
-        const average = Number(body.average ?? NaN);
-        if (!Number.isFinite(average) || average < 0) {
-          return badRequest("Average must be a non-negative number");
+        const patch: {
+          name?: string;
+          average?: number;
+          scratchEntries?: number;
+          handicapEntries?: number;
+        } = {};
+
+        if (body.name != null) {
+          const name = String(body.name).trim();
+          if (!name) return badRequest("Name cannot be empty");
+          patch.name = name;
         }
-        const bowler = updateBowlerAverage(sessionId, bowlerId, average);
+        if (body.average != null) {
+          const average = Number(body.average);
+          if (!Number.isFinite(average) || average < 0) {
+            return badRequest("Average must be a non-negative number");
+          }
+          patch.average = average;
+        }
+        if (body.scratchEntries != null) {
+          const scratchEntries = Number(body.scratchEntries);
+          if (!Number.isFinite(scratchEntries) || scratchEntries < 0) {
+            return badRequest("Scratch entries must be a non-negative number");
+          }
+          patch.scratchEntries = scratchEntries;
+        }
+        if (body.handicapEntries != null) {
+          const handicapEntries = Number(body.handicapEntries);
+          if (!Number.isFinite(handicapEntries) || handicapEntries < 0) {
+            return badRequest("Handicap entries must be a non-negative number");
+          }
+          patch.handicapEntries = handicapEntries;
+        }
+
+        if (Object.keys(patch).length === 0) {
+          return badRequest("No valid fields provided");
+        }
+
+        const bowler = updateBowler(sessionId, bowlerId, patch);
         return json({ bowler });
       }
 
