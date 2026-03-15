@@ -1,0 +1,20 @@
+[package]
+name = "v2-bracketeer"
+version = "0.1.0"
+description = "V2 Bracketeer desktop app"
+authors = ["justinjewell"]
+license = ""
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+strip = true
