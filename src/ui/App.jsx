@@ -6,6 +6,16 @@ const PAGE_LABELS = {
   brackets: "Brackets + Refunds",
   scores: "Score Updates",
   payouts: "Payout Summary",
+  maintenance: "Maintenance",
+};
+
+const PAGE_REQUIRES_SESSION = {
+  session: false,
+  bowlers: true,
+  brackets: true,
+  scores: true,
+  payouts: true,
+  maintenance: false,
 };
 
 function toMoney(cents) {
@@ -88,9 +98,11 @@ export function App() {
     message: "",
   });
   const [refundModalOpen, setRefundModalOpen] = useState(false);
-  const [refundPaidBySession, setRefundPaidBySession] = useState({});
+  const [addBowlerModalOpen, setAddBowlerModalOpen] = useState(false);
+  const [sessionDeleteModal, setSessionDeleteModal] = useState({ open: false, sessionId: null, sessionName: "" });
 
   const hasLoadedSession = Boolean(snapshot?.session);
+  const sessionCompleted = Boolean(snapshot?.session?.is_completed);
 
   const sortedBowlers = useMemo(() => {
     const bowlers = snapshot?.bowlers ?? [];
@@ -138,6 +150,7 @@ export function App() {
 
   useEffect(() => {
     setBowlerSearchQuery("");
+    setSelectedBowlerPdfName("");
   }, [activeSessionId]);
 
   useEffect(() => {
@@ -220,7 +233,6 @@ export function App() {
         payoutFirstDollars: 25,
         payoutSecondDollars: 10,
       });
-      setSelectedBowlerPdfName("");
       formEl.reset();
 
       const importedCount = Number(created.importedBowlers ?? 0);
@@ -272,6 +284,10 @@ export function App() {
       setStatus("Select session first");
       return;
     }
+    if (sessionCompleted) {
+      setStatus("Session is completed and read-only");
+      return;
+    }
 
     const form = new FormData(e.currentTarget);
     const payload = Object.fromEntries(form.entries());
@@ -283,6 +299,7 @@ export function App() {
       });
       await loadSnapshot(activeSessionId);
       setBowlerFormDefaults({ name: "", average: "", scratchEntries: 0, handicapEntries: 0 });
+      setAddBowlerModalOpen(false);
       setStatus("Bowler added");
     } catch (err) {
       setStatus(err.message);
@@ -297,6 +314,10 @@ export function App() {
   async function updateBowlerField(bowlerId, patch, label) {
     if (!activeSessionId) {
       setStatus("Select session first");
+      return;
+    }
+    if (sessionCompleted) {
+      setStatus("Session is completed and read-only");
       return;
     }
 
@@ -332,6 +353,10 @@ export function App() {
   }
 
   function onClickDelete(bowlerId) {
+    if (sessionCompleted) {
+      setStatus("Session is completed and read-only");
+      return;
+    }
     const hasBrackets = (snapshot?.brackets?.length ?? 0) > 0;
     setConfirmState({
       open: true,
@@ -366,6 +391,10 @@ export function App() {
       setStatus("Select session first");
       return;
     }
+    if (sessionCompleted) {
+      setStatus("Session is completed and read-only");
+      return;
+    }
 
     try {
       const nextSnapshot = await api(`/api/sessions/${activeSessionId}/generate-brackets`, {
@@ -379,18 +408,110 @@ export function App() {
     }
   }
 
-  function toggleRefundPaid(bowlerId) {
+  async function toggleRefundPaid(bowlerId) {
     if (!activeSessionId) return;
-    setRefundPaidBySession((prev) => {
-      const sessionMarks = { ...(prev[activeSessionId] ?? {}) };
-      sessionMarks[bowlerId] = !sessionMarks[bowlerId];
-      return { ...prev, [activeSessionId]: sessionMarks };
-    });
+    if (sessionCompleted) {
+      setStatus("Session is completed and read-only");
+      return;
+    }
+    const isPaid = (snapshot?.paidRefundBowlerIds ?? []).includes(bowlerId);
+    try {
+      const nextSnapshot = await api(`/api/sessions/${activeSessionId}/refunds/${bowlerId}/paid`, {
+        method: "PATCH",
+        body: JSON.stringify({ paid: !isPaid }),
+      });
+      setSnapshot(nextSnapshot);
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  async function togglePayoutPaid(bowlerId) {
+    if (!activeSessionId) return;
+    if (sessionCompleted) {
+      setStatus("Session is completed and read-only");
+      return;
+    }
+    const isPaid = (snapshot?.paidPayoutBowlerIds ?? []).includes(bowlerId);
+    try {
+      const nextSnapshot = await api(`/api/sessions/${activeSessionId}/payouts/${bowlerId}/paid`, {
+        method: "PATCH",
+        body: JSON.stringify({ paid: !isPaid }),
+      });
+      setSnapshot(nextSnapshot);
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  async function onCompleteSession() {
+    if (!activeSessionId) return;
+    try {
+      const nextSnapshot = await api(`/api/sessions/${activeSessionId}/complete`, { method: "POST" });
+      setSnapshot(nextSnapshot);
+      await loadSessions();
+      setStatus("Session marked complete");
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  async function onCloneSession() {
+    if (!activeSessionId) return;
+    try {
+      const result = await api(`/api/sessions/${activeSessionId}/clone`, { method: "POST", body: JSON.stringify({}) });
+      await loadSessions();
+      const newId = result?.session?.id;
+      if (newId) {
+        setActiveSessionId(newId);
+        await loadSnapshot(newId);
+        setActivePage("bowlers");
+      }
+      setStatus("New session created from current session");
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  function onAskDeleteSession(session) {
+    setSessionDeleteModal({ open: true, sessionId: session.id, sessionName: session.name });
+  }
+
+  async function onConfirmDeleteSession() {
+    const targetId = sessionDeleteModal.sessionId;
+    setSessionDeleteModal({ open: false, sessionId: null, sessionName: "" });
+    if (!Number.isFinite(targetId)) return;
+
+    try {
+      await api(`/api/sessions/${targetId}`, { method: "DELETE" });
+      const loadedSessions = await loadSessions();
+
+      if (activeSessionId === targetId) {
+        const nextId = loadedSessions[0]?.id ?? null;
+        setActiveSessionId(nextId);
+        if (nextId) {
+          await loadSnapshot(nextId);
+        } else {
+          setSnapshot(null);
+          setActivePage("session");
+        }
+      } else if (activeSessionId) {
+        await loadSnapshot(activeSessionId);
+      }
+
+      setStatus("Session deleted");
+    } catch (err) {
+      setStatus(err.message);
+    }
   }
 
   async function onSaveScores() {
     if (!activeSessionId || !snapshot) {
       setStatus("Select and load a session first");
+      return;
+    }
+    if (sessionCompleted) {
+      setStatus("Session is completed and read-only");
       return;
     }
 
@@ -421,39 +542,98 @@ export function App() {
     }
   }
 
+  async function onImportBowlersPdf(e) {
+    e.preventDefault();
+    if (!activeSessionId) {
+      setStatus("Select session first");
+      return;
+    }
+    if (sessionCompleted) {
+      setStatus("Session is completed and read-only");
+      return;
+    }
+    const form = new FormData(e.currentTarget);
+    const file = form.get("bowlerPdf");
+    if (!(file instanceof File) || file.size === 0) {
+      setStatus("Choose a PDF first");
+      return;
+    }
+    try {
+      const result = await api(`/api/sessions/${activeSessionId}/import-bowlers-pdf`, {
+        method: "POST",
+        body: form,
+      });
+      await loadSnapshot(activeSessionId);
+      setSelectedBowlerPdfName("");
+      e.currentTarget.reset();
+      setStatus(`Imported ${result.importedBowlers} bowlers (${result.skippedBowlers} skipped).`);
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
   function renderSessionSummary() {
     if (!snapshot) {
-      return "No session loaded yet.";
+      return null;
     }
 
     const s = snapshot.session;
-    return JSON.stringify(
-      {
-        id: s.id,
-        name: s.name,
-        entryFee: toMoney(s.entry_fee_cents),
-        handicap: `${s.handicap_percent}% of ${s.handicap_base}`,
-        payoutFirst: toMoney(s.payout_first_cents),
-        payoutSecond: toMoney(s.payout_second_cents),
-        bowlers: snapshot.bowlers.length,
-        brackets: snapshot.brackets.length,
-      },
-      null,
-      2
-    );
+    return {
+      name: s.name,
+      entryFee: toMoney(s.entry_fee_cents),
+      handicap: `${s.handicap_percent}% of ${s.handicap_base}`,
+      payoutFirst: toMoney(s.payout_first_cents),
+      payoutSecond: toMoney(s.payout_second_cents),
+      status: s.is_completed ? "Completed" : "Open",
+      completedAt: s.completed_at,
+    };
   }
 
   const refundTotals = snapshot?.refundTotals ?? [];
   const payouts = snapshot?.payoutTotals ?? [];
   const totalRefunds = refundTotals.reduce((acc, row) => acc + row.amountCents, 0);
   const totalPayouts = payouts.reduce((acc, row) => acc + row.amountCents, 0);
+  const paidRefundMap = new Set(snapshot?.paidRefundBowlerIds ?? []);
+  const paidPayoutMap = new Set(snapshot?.paidPayoutBowlerIds ?? []);
+  const paidRefundsTotal = refundTotals.reduce((acc, row) => {
+    return acc + (paidRefundMap.has(row.bowlerId) ? row.amountCents : 0);
+  }, 0);
+  const paidPayoutsTotal = payouts.reduce((acc, row) => {
+    return acc + (paidPayoutMap.has(row.bowlerId) ? row.amountCents : 0);
+  }, 0);
+  const outstandingRefunds = snapshot?.completion?.refundsOutstandingCents ?? Math.max(0, totalRefunds - paidRefundsTotal);
+  const outstandingPayouts = snapshot?.completion?.payoutsOutstandingCents ?? Math.max(0, totalPayouts - paidPayoutsTotal);
   const kpis = [
     { label: "Active Bowlers", value: String(snapshot?.bowlers?.length ?? 0) },
     { label: "Generated Brackets", value: String(snapshot?.brackets?.length ?? 0) },
-    { label: "Refund Exposure", value: toMoney(totalRefunds) },
-    { label: "Payouts Posted", value: toMoney(totalPayouts) },
+    { label: "Refunds Outstanding", value: outstandingRefunds === 0 ? "All Refunded" : toMoney(outstandingRefunds) },
+    { label: "Payouts Outstanding", value: outstandingPayouts === 0 ? "All Paid" : toMoney(outstandingPayouts) },
   ];
-  const paidRefundMap = refundPaidBySession[activeSessionId] ?? {};
+  const sessionSummary = renderSessionSummary();
+
+  function isGameComplete(game) {
+    const required = snapshot?.requiredScorersByGame?.[`game${game}`] ?? [];
+    if (required.length === 0) return false;
+    const saved = new Set(
+      (snapshot?.scores ?? [])
+        .filter((row) => row.game_number === game)
+        .map((row) => row.bowler_id)
+    );
+    return required.every((row) => saved.has(row.bowlerId));
+  }
+
+  const game1Complete = isGameComplete(1);
+  const game2Complete = isGameComplete(2);
+
+  useEffect(() => {
+    if (gameNumber === 3 && !game2Complete) {
+      setGameNumber(game1Complete ? 2 : 1);
+      return;
+    }
+    if (gameNumber === 2 && !game1Complete) {
+      setGameNumber(1);
+    }
+  }, [gameNumber, game1Complete, game2Complete]);
 
   return (
     <>
@@ -473,7 +653,7 @@ export function App() {
 
           <nav className="nav">
             {Object.entries(PAGE_LABELS).map(([key, label]) => {
-              const requiresSession = key !== "session";
+              const requiresSession = PAGE_REQUIRES_SESSION[key];
               const hidden = requiresSession && !hasLoadedSession;
               const locked = requiresSession && !hasLoadedSession;
               return (
@@ -504,6 +684,7 @@ export function App() {
             </div>
             <div className="topbar-actions">
               <span className="pill">{snapshot?.session ? `Session #${snapshot.session.id}` : "No Session"}</span>
+              {sessionCompleted && <span className="pill complete-pill">Completed</span>}
               <span className="pill status-pill">{status}</span>
             </div>
           </header>
@@ -595,23 +776,6 @@ export function App() {
                       required
                     />
                   </label>
-                  <div className="file-label">
-                    <span>League Bowler PDF (optional)</span>
-                    <div className="file-upload">
-                      <input
-                        id="bowlerPdf"
-                        className="file-input"
-                        name="bowlerPdf"
-                        type="file"
-                        accept=".pdf,application/pdf"
-                        onChange={(e) => setSelectedBowlerPdfName(e.target.files?.[0]?.name ?? "")}
-                      />
-                      <label htmlFor="bowlerPdf" className="file-btn">
-                        Choose PDF
-                      </label>
-                      <span className="file-name">{selectedBowlerPdfName || "No file selected"}</span>
-                    </div>
-                  </div>
                   <button type="submit">Create Session</button>
                 </form>
               </section>
@@ -632,8 +796,56 @@ export function App() {
                   <button className="button secondary" type="button" onClick={onLoadSnapshot}>
                     Load Session
                   </button>
+                  <button className="button secondary" type="button" onClick={onCloneSession} disabled={!hasLoadedSession}>
+                    New From This Session
+                  </button>
+                  <button
+                    className="button secondary"
+                    type="button"
+                    onClick={onCompleteSession}
+                    disabled={!snapshot?.completion?.canComplete || sessionCompleted}
+                  >
+                    Complete Session
+                  </button>
                 </div>
-                <pre className="panel">{renderSessionSummary()}</pre>
+                <div className="panel session-summary-panel">
+                  {!sessionSummary ? (
+                    <div>No session loaded yet.</div>
+                  ) : (
+                    <>
+                      <div className="summary-row">
+                        <span>Session</span>
+                        <strong>{sessionSummary.name}</strong>
+                      </div>
+                      <div className="summary-row">
+                        <span>Entry Fee</span>
+                        <strong>{sessionSummary.entryFee}</strong>
+                      </div>
+                      <div className="summary-row">
+                        <span>Handicap</span>
+                        <strong>{sessionSummary.handicap}</strong>
+                      </div>
+                      <div className="summary-row">
+                        <span>1st Payout</span>
+                        <strong>{sessionSummary.payoutFirst}</strong>
+                      </div>
+                      <div className="summary-row">
+                        <span>2nd Payout</span>
+                        <strong>{sessionSummary.payoutSecond}</strong>
+                      </div>
+                      <div className="summary-row">
+                        <span>Status</span>
+                        <strong>{sessionSummary.status}</strong>
+                      </div>
+                      {sessionSummary.completedAt && (
+                        <div className="summary-row">
+                          <span>Completed At</span>
+                          <strong>{sessionSummary.completedAt}</strong>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
               </section>
             </div>
           </section>
@@ -647,52 +859,12 @@ export function App() {
               </div>
             </header>
 
-            <section className="card">
-              <form className="grid" onSubmit={onAddBowler}>
-                <label>
-                  Name
-                  <input
-                    required
-                    name="name"
-                    value={bowlerFormDefaults.name}
-                    onChange={(e) => setBowlerFormDefaults((p) => ({ ...p, name: e.target.value }))}
-                  />
-                </label>
-                <label>
-                  Average
-                  <input
-                    required
-                    name="average"
-                    type="number"
-                    min="0"
-                    value={bowlerFormDefaults.average}
-                    onChange={(e) => setBowlerFormDefaults((p) => ({ ...p, average: e.target.value }))}
-                  />
-                </label>
-                <label>
-                  Scratch Entries
-                  <input
-                    required
-                    name="scratchEntries"
-                    type="number"
-                    min="0"
-                    value={bowlerFormDefaults.scratchEntries}
-                    onChange={(e) => setBowlerFormDefaults((p) => ({ ...p, scratchEntries: e.target.value }))}
-                  />
-                </label>
-                <label>
-                  Handicap Entries
-                  <input
-                    required
-                    name="handicapEntries"
-                    type="number"
-                    min="0"
-                    value={bowlerFormDefaults.handicapEntries}
-                    onChange={(e) => setBowlerFormDefaults((p) => ({ ...p, handicapEntries: e.target.value }))}
-                  />
-                </label>
-                <button type="submit">Add Bowler</button>
-              </form>
+            <section className="card bowlers-card">
+              <div className="row">
+                <button type="button" onClick={() => setAddBowlerModalOpen(true)} disabled={sessionCompleted}>
+                  Add Bowler
+                </button>
+              </div>
 
               <div className="row">
                 <input
@@ -703,6 +875,27 @@ export function App() {
                   onChange={(e) => setBowlerSearchQuery(e.target.value)}
                 />
               </div>
+
+              <form className="file-label" onSubmit={onImportBowlersPdf}>
+                <span>Import Bowlers from League PDF</span>
+                <div className="file-upload">
+                  <input
+                    id="bowlerPdf"
+                    className="file-input"
+                    name="bowlerPdf"
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    onChange={(e) => setSelectedBowlerPdfName(e.target.files?.[0]?.name ?? "")}
+                  />
+                  <label htmlFor="bowlerPdf" className="file-btn">
+                    Choose PDF
+                  </label>
+                  <span className="file-name">{selectedBowlerPdfName || "No file selected"}</span>
+                  <button type="submit" className="button secondary" disabled={sessionCompleted}>
+                    Import PDF
+                  </button>
+                </div>
+              </form>
 
               <div className="panel">
                 {filteredBowlers.length === 0 ? (
@@ -748,6 +941,7 @@ export function App() {
                                 <button
                                   type="button"
                                   className="mini-btn"
+                                  disabled={sessionCompleted}
                                   onClick={() => {
                                     const name = String(nameDrafts[bowler.id] ?? "").trim();
                                     void updateBowlerField(bowler.id, { name }, "Name");
@@ -767,6 +961,7 @@ export function App() {
                               <button
                                 type="button"
                                 className="avg-display"
+                                disabled={sessionCompleted}
                                 onClick={() => {
                                   setNameDrafts((prev) => ({ ...prev, [bowler.id]: bowler.name }));
                                   setEditingCell({ bowlerId: bowler.id, field: "name" });
@@ -800,7 +995,12 @@ export function App() {
                                     }
                                   }}
                                 />
-                                <button type="button" className="mini-btn" onClick={() => void onUpdateAverage(bowler.id)}>
+                                <button
+                                  type="button"
+                                  className="mini-btn"
+                                  disabled={sessionCompleted}
+                                  onClick={() => void onUpdateAverage(bowler.id)}
+                                >
                                   Save
                                 </button>
                                 <button
@@ -815,6 +1015,7 @@ export function App() {
                               <button
                                 type="button"
                                 className="avg-display"
+                                disabled={sessionCompleted}
                                 onClick={() => {
                                   setAverageDrafts((prev) => ({ ...prev, [bowler.id]: String(bowler.average) }));
                                   setEditingCell({ bowlerId: bowler.id, field: "average" });
@@ -853,6 +1054,7 @@ export function App() {
                                 <button
                                   type="button"
                                   className="mini-btn"
+                                  disabled={sessionCompleted}
                                   onClick={() => {
                                     const scratchEntries = Number(scratchEntriesDrafts[bowler.id]);
                                     void updateBowlerField(bowler.id, { scratchEntries }, "Scratch entries");
@@ -872,6 +1074,7 @@ export function App() {
                               <button
                                 type="button"
                                 className="avg-display"
+                                disabled={sessionCompleted}
                                 onClick={() => {
                                   setScratchEntriesDrafts((prev) => ({
                                     ...prev,
@@ -912,6 +1115,7 @@ export function App() {
                                 <button
                                   type="button"
                                   className="mini-btn"
+                                  disabled={sessionCompleted}
                                   onClick={() => {
                                     const handicapEntries = Number(handicapEntriesDrafts[bowler.id]);
                                     void updateBowlerField(bowler.id, { handicapEntries }, "Handicap entries");
@@ -931,6 +1135,7 @@ export function App() {
                               <button
                                 type="button"
                                 className="avg-display"
+                                disabled={sessionCompleted}
                                 onClick={() => {
                                   setHandicapEntriesDrafts((prev) => ({
                                     ...prev,
@@ -947,6 +1152,7 @@ export function App() {
                             <button
                               type="button"
                               className="icon-button danger"
+                              disabled={sessionCompleted}
                               onClick={() => onClickDelete(bowler.id)}
                             >
                               Delete
@@ -972,7 +1178,7 @@ export function App() {
 
             <section className="card">
               <div className="row">
-                <button type="button" onClick={onGenerateBrackets}>
+                <button type="button" onClick={onGenerateBrackets} disabled={sessionCompleted}>
                   Generate Brackets
                 </button>
                 {refundTotals.length > 0 && (
@@ -1027,15 +1233,32 @@ export function App() {
 
             <section className="card">
               <div className="row">
-                <label>
-                  Game
-                  <select value={gameNumber} onChange={(e) => setGameNumber(Number(e.target.value))}>
-                    <option value={1}>Game 1</option>
-                    <option value={2}>Game 2</option>
-                    <option value={3}>Game 3</option>
-                  </select>
-                </label>
-                <button type="button" onClick={onSaveScores}>
+                <div className="game-tabs" role="tablist" aria-label="Game tabs">
+                  <button
+                    type="button"
+                    className={`tab-btn ${gameNumber === 1 ? "is-active" : ""}`}
+                    onClick={() => setGameNumber(1)}
+                  >
+                    Game 1
+                  </button>
+                  <button
+                    type="button"
+                    className={`tab-btn ${gameNumber === 2 ? "is-active" : ""}`}
+                    onClick={() => setGameNumber(2)}
+                    disabled={!game1Complete}
+                  >
+                    Game 2
+                  </button>
+                  <button
+                    type="button"
+                    className={`tab-btn ${gameNumber === 3 ? "is-active" : ""}`}
+                    onClick={() => setGameNumber(3)}
+                    disabled={!game2Complete}
+                  >
+                    Game 3
+                  </button>
+                </div>
+                <button type="button" onClick={onSaveScores} disabled={sessionCompleted}>
                   Save Scores
                 </button>
               </div>
@@ -1076,7 +1299,72 @@ export function App() {
               <div className="panel">
                 {payouts.length === 0
                   ? "No completed brackets yet"
-                  : payouts.map((p) => <div key={p.bowlerId}>{`${p.name}: ${toMoney(p.amountCents)}`}</div>)}
+                  : payouts.map((p) => {
+                      const isPaid = paidPayoutMap.has(p.bowlerId);
+                      return (
+                        <div className={`refund-row ${isPaid ? "is-paid" : ""}`} key={p.bowlerId}>
+                          <div className="refund-meta">
+                            <strong>{p.name}</strong>
+                            <span>{toMoney(p.amountCents)}</span>
+                          </div>
+                          <button
+                            type="button"
+                            className={`mini-btn ${isPaid ? "secondary" : ""}`}
+                            onClick={() => void togglePayoutPaid(p.bowlerId)}
+                            disabled={sessionCompleted}
+                          >
+                            {isPaid ? "Undo" : "Mark Paid"}
+                          </button>
+                        </div>
+                      );
+                    })}
+              </div>
+            </section>
+          </section>
+
+          <section className={`page ${activePage === "maintenance" ? "is-active" : ""}`}>
+            <header className="page-head">
+              <div>
+                <p className="eyebrow">Maintenance</p>
+                <h1>Session management</h1>
+                <p className="subhead">Delete old or mistaken sessions. More maintenance options can live here later.</p>
+              </div>
+            </header>
+
+            <section className="card">
+              <div className="panel">
+                {sessions.length === 0 ? (
+                  <div>No sessions available</div>
+                ) : (
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Session</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sessions.map((session) => (
+                        <tr key={session.id}>
+                          <td>{session.name}</td>
+                          <td>{session.is_completed ? "Completed" : "Open"}</td>
+                          <td>{session.created_at ?? "-"}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="icon-button danger"
+                              onClick={() => onAskDeleteSession(session)}
+                            >
+                              Delete Session
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
             </section>
           </section>
@@ -1130,7 +1418,7 @@ export function App() {
               <div className="refund-empty">No refunds for this bracket run.</div>
             ) : (
               refundTotals.map((row) => {
-                const isPaid = Boolean(paidRefundMap[row.bowlerId]);
+                const isPaid = paidRefundMap.has(row.bowlerId);
                 return (
                   <div className={`refund-row ${isPaid ? "is-paid" : ""}`} key={row.bowlerId}>
                     <div className="refund-meta">
@@ -1140,7 +1428,8 @@ export function App() {
                     <button
                       type="button"
                       className={`mini-btn ${isPaid ? "secondary" : ""}`}
-                      onClick={() => toggleRefundPaid(row.bowlerId)}
+                      onClick={() => void toggleRefundPaid(row.bowlerId)}
+                      disabled={sessionCompleted}
                     >
                       {isPaid ? "Undo" : "Mark Paid"}
                     </button>
@@ -1154,6 +1443,103 @@ export function App() {
               Close
             </button>
           </div>
+        </div>
+      </div>
+
+      <div
+        className={`modal ${sessionDeleteModal.open ? "" : "is-hidden"}`}
+        aria-hidden={sessionDeleteModal.open ? "false" : "true"}
+        onClick={(e) => {
+          if (e.currentTarget === e.target) {
+            setSessionDeleteModal({ open: false, sessionId: null, sessionName: "" });
+          }
+        }}
+      >
+        <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="delete-session-title">
+          <h2 id="delete-session-title">Delete Session</h2>
+          <p>
+            Delete session <strong>{sessionDeleteModal.sessionName}</strong>? This removes bowlers, scores, brackets,
+            refunds, and payouts for this session.
+          </p>
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="button secondary"
+              onClick={() => setSessionDeleteModal({ open: false, sessionId: null, sessionName: "" })}
+            >
+              Cancel
+            </button>
+            <button type="button" className="icon-button danger" onClick={() => void onConfirmDeleteSession()}>
+              Delete Session
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div
+        className={`modal ${addBowlerModalOpen ? "" : "is-hidden"}`}
+        aria-hidden={addBowlerModalOpen ? "false" : "true"}
+        onClick={(e) => {
+          if (e.currentTarget === e.target) {
+            setAddBowlerModalOpen(false);
+          }
+        }}
+      >
+        <div className="modal-card add-bowler-modal-card" role="dialog" aria-modal="true" aria-labelledby="add-bowler-title">
+          <h2 id="add-bowler-title">Add Bowler</h2>
+          <p>Enter bowler details. Bracket entries can be set now or edited later.</p>
+          <form className="grid compact-grid" onSubmit={onAddBowler}>
+            <label>
+              Name
+              <input
+                required
+                name="name"
+                value={bowlerFormDefaults.name}
+                onChange={(e) => setBowlerFormDefaults((p) => ({ ...p, name: e.target.value }))}
+              />
+            </label>
+            <label>
+              Average
+              <input
+                required
+                name="average"
+                type="number"
+                min="0"
+                value={bowlerFormDefaults.average}
+                onChange={(e) => setBowlerFormDefaults((p) => ({ ...p, average: e.target.value }))}
+              />
+            </label>
+            <label>
+              Scratch Entries
+              <input
+                required
+                name="scratchEntries"
+                type="number"
+                min="0"
+                value={bowlerFormDefaults.scratchEntries}
+                onChange={(e) => setBowlerFormDefaults((p) => ({ ...p, scratchEntries: e.target.value }))}
+              />
+            </label>
+            <label>
+              Handicap Entries
+              <input
+                required
+                name="handicapEntries"
+                type="number"
+                min="0"
+                value={bowlerFormDefaults.handicapEntries}
+                onChange={(e) => setBowlerFormDefaults((p) => ({ ...p, handicapEntries: e.target.value }))}
+              />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="button secondary" onClick={() => setAddBowlerModalOpen(false)}>
+                Cancel
+              </button>
+              <button type="submit" disabled={sessionCompleted}>
+                Add Bowler
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     </>
