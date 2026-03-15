@@ -200,6 +200,11 @@ body {
   color: #b7ffe1;
 }
 
+.complete-pill {
+  border-color: rgba(255, 240, 140, 0.4);
+  color: #fff2b0;
+}
+
 .metric-strip {
   margin-top: 0.8rem;
   display: grid;
@@ -279,6 +284,10 @@ body {
   background: var(--panel);
   box-shadow: var(--shadow);
   padding: 0.95rem;
+}
+
+.bowlers-card {
+  max-width: 1180px;
 }
 
 h2 {
@@ -381,6 +390,12 @@ button {
   font-weight: 600;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  filter: saturate(0.7);
+}
+
 .button.secondary,
 button.secondary,
 .icon-button {
@@ -419,6 +434,30 @@ button:focus {
   align-items: center;
 }
 
+.game-tabs {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.tab-btn {
+  border-radius: 0;
+  border-right: 1px solid var(--line);
+  background: rgba(77, 184, 142, 0.1);
+  color: #d9ffed;
+  padding: 0.48rem 0.72rem;
+}
+
+.tab-btn:last-child {
+  border-right: none;
+}
+
+.tab-btn.is-active {
+  background: linear-gradient(90deg, var(--accent), #2fce91);
+  color: #ffffff;
+}
+
 .panel {
   margin-top: 0.8rem;
   border: 1px solid var(--line);
@@ -427,6 +466,29 @@ button:focus {
   padding: 0.75rem;
   color: #e0e2ff;
   overflow-x: auto;
+}
+
+.session-summary-panel {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  border-bottom: 1px solid rgba(77, 184, 142, 0.18);
+  padding-bottom: 0.35rem;
+}
+
+.summary-row span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.summary-row strong {
+  color: var(--text);
+  text-align: right;
 }
 
 .score-panel {
@@ -560,6 +622,19 @@ thead th {
 
 .refund-modal-card {
   width: min(560px, 100%);
+}
+
+.add-bowler-modal-card {
+  width: min(700px, 100%);
+}
+
+.compact-grid {
+  margin-top: 0.7rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.compact-grid .modal-actions {
+  grid-column: 1 / -1;
 }
 
 .refund-list {

@@ -2,12 +2,17 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   addBowler,
+  cloneSessionFromExisting,
+  completeSession,
   createSession,
+  deleteSession,
   deleteBowler,
   generateBrackets,
   getSessionSnapshot,
   listBowlers,
   listSessions,
+  setPayoutPaid,
+  setRefundPaid,
   updateBowler,
   upsertGameScores,
 } from "./lib/engine";
@@ -44,9 +49,9 @@ function parseSessionId(pathname: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function parseBowlerId(pathname: string): number | null {
+function parseResourceId(pathname: string, segment: string): number | null {
   const parts = pathname.split("/").filter(Boolean);
-  const idx = parts.indexOf("bowlers");
+  const idx = parts.indexOf(segment);
   if (idx < 0 || !parts[idx + 1]) {
     return null;
   }
@@ -167,6 +172,26 @@ Bun.serve({
         return json(getSessionSnapshot(sessionId));
       }
 
+      if (pathname.endsWith("/clone") && req.method === "POST") {
+        const sessionId = parseSessionId(pathname);
+        if (!sessionId) return badRequest("Invalid session id");
+        const body = await req.json().catch(() => ({}));
+        const session = cloneSessionFromExisting(sessionId, body?.name ? String(body.name) : undefined);
+        return json({ session });
+      }
+
+      if (pathname.endsWith("/complete") && req.method === "POST") {
+        const sessionId = parseSessionId(pathname);
+        if (!sessionId) return badRequest("Invalid session id");
+        return json(completeSession(sessionId));
+      }
+
+      if (pathname.match(/^\/api\/sessions\/\d+$/) && req.method === "DELETE") {
+        const sessionId = parseSessionId(pathname);
+        if (!sessionId) return badRequest("Invalid session id");
+        return json(deleteSession(sessionId));
+      }
+
       if (pathname.endsWith("/bowlers") && req.method === "GET") {
         const sessionId = parseSessionId(pathname);
         if (!sessionId) return badRequest("Invalid session id");
@@ -186,9 +211,44 @@ Bun.serve({
         return json({ bowler });
       }
 
+      if (pathname.endsWith("/import-bowlers-pdf") && req.method === "POST") {
+        const sessionId = parseSessionId(pathname);
+        if (!sessionId) return badRequest("Invalid session id");
+        const form = await req.formData();
+        const file = form.get("bowlerPdf");
+        if (!(file instanceof File) || file.size === 0) {
+          return badRequest("PDF file is required");
+        }
+
+        const parsedBowlers = await parseLeagueSecretaryBowlerPdf(new Uint8Array(await file.arrayBuffer()));
+        const existing = listBowlers(sessionId) as { name: string }[];
+        const existingNames = new Set(existing.map((row) => row.name.trim().toLowerCase()));
+        const seen = new Set<string>();
+
+        let importedBowlers = 0;
+        let skippedBowlers = 0;
+        for (const parsed of parsedBowlers) {
+          const key = parsed.name.trim().toLowerCase();
+          if (!key || seen.has(key) || existingNames.has(key)) {
+            skippedBowlers += 1;
+            continue;
+          }
+          seen.add(key);
+          addBowler(sessionId, {
+            name: parsed.name,
+            average: parsed.average,
+            scratchEntries: 0,
+            handicapEntries: 0,
+          });
+          importedBowlers += 1;
+        }
+
+        return json({ importedBowlers, skippedBowlers });
+      }
+
       if (pathname.includes("/bowlers/") && req.method === "PATCH") {
         const sessionId = parseSessionId(pathname);
-        const bowlerId = parseBowlerId(pathname);
+        const bowlerId = parseResourceId(pathname, "bowlers");
         if (!sessionId || !bowlerId) return badRequest("Invalid session or bowler id");
         const body = await req.json();
         const patch: {
@@ -235,10 +295,26 @@ Bun.serve({
 
       if (pathname.includes("/bowlers/") && req.method === "DELETE") {
         const sessionId = parseSessionId(pathname);
-        const bowlerId = parseBowlerId(pathname);
+        const bowlerId = parseResourceId(pathname, "bowlers");
         if (!sessionId || !bowlerId) return badRequest("Invalid session or bowler id");
         const result = deleteBowler(sessionId, bowlerId);
         return json(result);
+      }
+
+      if (pathname.includes("/refunds/") && pathname.endsWith("/paid") && req.method === "PATCH") {
+        const sessionId = parseSessionId(pathname);
+        const bowlerId = parseResourceId(pathname, "refunds");
+        if (!sessionId || !bowlerId) return badRequest("Invalid session or bowler id");
+        const body = await req.json();
+        return json(setRefundPaid(sessionId, bowlerId, Boolean(body.paid)));
+      }
+
+      if (pathname.includes("/payouts/") && pathname.endsWith("/paid") && req.method === "PATCH") {
+        const sessionId = parseSessionId(pathname);
+        const bowlerId = parseResourceId(pathname, "payouts");
+        if (!sessionId || !bowlerId) return badRequest("Invalid session or bowler id");
+        const body = await req.json();
+        return json(setPayoutPaid(sessionId, bowlerId, Boolean(body.paid)));
       }
 
       if (pathname.endsWith("/generate-brackets") && req.method === "POST") {

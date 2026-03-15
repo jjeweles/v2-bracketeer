@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   handicap_base INTEGER NOT NULL,
   payout_first_cents INTEGER NOT NULL,
   payout_second_cents INTEGER NOT NULL,
+  is_completed INTEGER NOT NULL DEFAULT 0,
+  completed_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -75,7 +77,36 @@ CREATE TABLE IF NOT EXISTS bowler_scores (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(session_id, bowler_id, game_number)
 );
+
+CREATE TABLE IF NOT EXISTS refund_payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  bowler_id INTEGER NOT NULL REFERENCES bowlers(id) ON DELETE CASCADE,
+  paid_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(session_id, bowler_id)
+);
+
+CREATE TABLE IF NOT EXISTS payout_payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  bowler_id INTEGER NOT NULL REFERENCES bowlers(id) ON DELETE CASCADE,
+  paid_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(session_id, bowler_id)
+);
 `);
+
+function hasColumn(table: string, column: string): boolean {
+  const rows = db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  return rows.some((row) => row.name === column);
+}
+
+if (!hasColumn("sessions", "is_completed")) {
+  db.exec(`ALTER TABLE sessions ADD COLUMN is_completed INTEGER NOT NULL DEFAULT 0`);
+}
+
+if (!hasColumn("sessions", "completed_at")) {
+  db.exec(`ALTER TABLE sessions ADD COLUMN completed_at TEXT`);
+}
 
 const seedDemoSession = db.transaction(() => {
   if (RESET_TO_DEMO_ON_BOOT) {

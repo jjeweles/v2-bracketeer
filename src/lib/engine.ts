@@ -20,6 +20,8 @@ type Session = {
   handicap_base: number;
   payout_first_cents: number;
   payout_second_cents: number;
+  is_completed: number;
+  completed_at: string | null;
 };
 
 type Slot = { seed: number; bowlerId: number; bowlerName: string; handicapValue: number };
@@ -42,7 +44,7 @@ type BracketSnapshot = {
 };
 
 const getSessionStmt = db.query(
-  `SELECT id, name, entry_fee_cents, handicap_percent, handicap_base, payout_first_cents, payout_second_cents FROM sessions WHERE id = ?`
+  `SELECT id, name, entry_fee_cents, handicap_percent, handicap_base, payout_first_cents, payout_second_cents, is_completed, completed_at FROM sessions WHERE id = ?`
 );
 const getBowlersStmt = db.query(
   `SELECT id, session_id, name, average, handicap_value, scratch_entries, handicap_entries FROM bowlers WHERE session_id = ? ORDER BY id`
@@ -72,10 +74,26 @@ function compareDisplayNames(a: string, b: string): number {
 export function listSessions() {
   return db
     .query(
-      `SELECT id, name, entry_fee_cents, handicap_percent, handicap_base, payout_first_cents, payout_second_cents, created_at
+      `SELECT id, name, entry_fee_cents, handicap_percent, handicap_base, payout_first_cents, payout_second_cents, is_completed, completed_at, created_at
        FROM sessions ORDER BY id DESC`
     )
     .all();
+}
+
+function getSessionOrThrow(sessionId: number): Session {
+  const session = getSessionStmt.get(sessionId) as Session | null;
+  if (!session) {
+    throw new Error("Session not found");
+  }
+  return session;
+}
+
+function assertSessionEditable(sessionId: number): Session {
+  const session = getSessionOrThrow(sessionId);
+  if (session.is_completed) {
+    throw new Error("Session is completed and read-only");
+  }
+  return session;
 }
 
 export function createSession(input: {
@@ -110,10 +128,7 @@ export function addBowler(
     handicapEntries: number;
   }
 ) {
-  const session = getSessionStmt.get(sessionId) as Session | null;
-  if (!session) {
-    throw new Error("Session not found");
-  }
+  const session = assertSessionEditable(sessionId);
 
   const handicapValue = calculateHandicap(input.average, session.handicap_percent, session.handicap_base);
 
@@ -136,6 +151,60 @@ export function listBowlers(sessionId: number) {
   return getBowlersStmt.all(sessionId);
 }
 
+function dateSuffix() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function uniqueSessionName(baseName: string): string {
+  const base = baseName.trim();
+  const exists = db.query(`SELECT 1 FROM sessions WHERE name = ? LIMIT 1`);
+  if (!exists.get(base)) {
+    return base;
+  }
+
+  const dated = `${base} - ${dateSuffix()}`;
+  if (!exists.get(dated)) {
+    return dated;
+  }
+
+  let n = 2;
+  while (exists.get(`${dated} (${n})`)) {
+    n += 1;
+  }
+  return `${dated} (${n})`;
+}
+
+export function cloneSessionFromExisting(sessionId: number, name?: string) {
+  const source = getSessionOrThrow(sessionId);
+  const clonedName = uniqueSessionName(name?.trim() || source.name);
+  const created = createSession({
+    name: clonedName,
+    entryFeeDollars: source.entry_fee_cents / 100,
+    handicapPercent: source.handicap_percent,
+    handicapBase: source.handicap_base,
+    payoutFirstDollars: source.payout_first_cents / 100,
+    payoutSecondDollars: source.payout_second_cents / 100,
+  }) as Session;
+
+  const sourceBowlers = getBowlersStmt.all(sessionId) as Bowler[];
+  for (const bowler of sourceBowlers) {
+    addBowler(created.id, {
+      name: bowler.name,
+      average: bowler.average,
+      scratchEntries: 0,
+      handicapEntries: 0,
+    });
+  }
+
+  return created;
+}
+
+export function deleteSession(sessionId: number) {
+  const session = getSessionOrThrow(sessionId);
+  db.query(`DELETE FROM sessions WHERE id = ?`).run(session.id);
+  return { deleted: true };
+}
+
 export function updateBowler(
   sessionId: number,
   bowlerId: number,
@@ -146,10 +215,7 @@ export function updateBowler(
     handicapEntries?: number;
   }
 ) {
-  const session = getSessionStmt.get(sessionId) as Session | null;
-  if (!session) {
-    throw new Error("Session not found");
-  }
+  const session = assertSessionEditable(sessionId);
 
   const bowler = getBowlerStmt.get(bowlerId, sessionId) as Bowler | null;
   if (!bowler) {
@@ -187,10 +253,7 @@ export function updateBowler(
 }
 
 export function deleteBowler(sessionId: number, bowlerId: number) {
-  const session = getSessionStmt.get(sessionId) as Session | null;
-  if (!session) {
-    throw new Error("Session not found");
-  }
+  assertSessionEditable(sessionId);
 
   const bowler = getBowlerStmt.get(bowlerId, sessionId) as Bowler | null;
   if (!bowler) {
@@ -212,6 +275,34 @@ export function deleteBowler(sessionId: number, bowlerId: number) {
 
   db.query(`DELETE FROM bowlers WHERE id = ? AND session_id = ?`).run(bowlerId, sessionId);
   return { deleted: true };
+}
+
+export function setRefundPaid(sessionId: number, bowlerId: number, paid: boolean) {
+  assertSessionEditable(sessionId);
+  if (paid) {
+    db.query(
+      `INSERT INTO refund_payments (session_id, bowler_id)
+       VALUES (?, ?)
+       ON CONFLICT(session_id, bowler_id) DO UPDATE SET paid_at = datetime('now')`
+    ).run(sessionId, bowlerId);
+  } else {
+    db.query(`DELETE FROM refund_payments WHERE session_id = ? AND bowler_id = ?`).run(sessionId, bowlerId);
+  }
+  return getSessionSnapshot(sessionId);
+}
+
+export function setPayoutPaid(sessionId: number, bowlerId: number, paid: boolean) {
+  assertSessionEditable(sessionId);
+  if (paid) {
+    db.query(
+      `INSERT INTO payout_payments (session_id, bowler_id)
+       VALUES (?, ?)
+       ON CONFLICT(session_id, bowler_id) DO UPDATE SET paid_at = datetime('now')`
+    ).run(sessionId, bowlerId);
+  } else {
+    db.query(`DELETE FROM payout_payments WHERE session_id = ? AND bowler_id = ?`).run(sessionId, bowlerId);
+  }
+  return getSessionSnapshot(sessionId);
 }
 
 function shuffle<T>(items: T[]): T[] {
@@ -291,14 +382,13 @@ function buildEightManGroups(entryCounts: Map<number, number>) {
 }
 
 export function generateBrackets(sessionId: number) {
-  const session = getSessionStmt.get(sessionId) as Session | null;
-  if (!session) {
-    throw new Error("Session not found");
-  }
+  const session = assertSessionEditable(sessionId);
 
   const bowlers = getBowlersStmt.all(sessionId) as Bowler[];
 
   db.transaction(() => {
+    db.query(`DELETE FROM refund_payments WHERE session_id = ?`).run(sessionId);
+    db.query(`DELETE FROM payout_payments WHERE session_id = ?`).run(sessionId);
     db.query(`DELETE FROM refunds WHERE session_id = ?`).run(sessionId);
     db.query(`DELETE FROM bracket_slots WHERE bracket_id IN (SELECT id FROM brackets WHERE session_id = ?)`).run(sessionId);
     db.query(`DELETE FROM brackets WHERE session_id = ?`).run(sessionId);
@@ -539,6 +629,7 @@ export function upsertGameScores(
   gameNumber: number,
   scores: Array<{ bowlerId: number; scratchScore: number }>
 ) {
+  assertSessionEditable(sessionId);
   const stmt = db.query(
     `INSERT INTO bowler_scores (session_id, bowler_id, game_number, scratch_score)
      VALUES (?, ?, ?, ?)
@@ -558,10 +649,7 @@ export function upsertGameScores(
 }
 
 export function getSessionSnapshot(sessionId: number) {
-  const session = getSessionStmt.get(sessionId) as Session | null;
-  if (!session) {
-    throw new Error("Session not found");
-  }
+  const session = getSessionOrThrow(sessionId);
 
   const rawBowlers = getBowlersStmt.all(sessionId) as Bowler[];
   const bowlers = rawBowlers.map((b) => ({
@@ -702,6 +790,34 @@ export function getSessionSnapshot(sessionId: number) {
     }))
     .sort((a, b) => compareDisplayNames(a.name, b.name));
 
+  const paidRefundBowlerIds = new Set(
+    (
+      db
+        .query(`SELECT bowler_id FROM refund_payments WHERE session_id = ?`)
+        .all(sessionId) as { bowler_id: number }[]
+    ).map((row) => row.bowler_id)
+  );
+  const paidPayoutBowlerIds = new Set(
+    (
+      db
+        .query(`SELECT bowler_id FROM payout_payments WHERE session_id = ?`)
+        .all(sessionId) as { bowler_id: number }[]
+    ).map((row) => row.bowler_id)
+  );
+
+  const refundsOutstandingCents = refundTotals.reduce((acc, row) => {
+    return acc + (paidRefundBowlerIds.has(row.bowlerId) ? 0 : row.amountCents);
+  }, 0);
+  const payoutsOutstandingCents = payoutTotals.reduce((acc, row) => {
+    return acc + (paidPayoutBowlerIds.has(row.bowlerId) ? 0 : row.amountCents);
+  }, 0);
+  const scoringComplete =
+    bracketSnapshots.length > 0 &&
+    bracketSnapshots.every((bracket) =>
+      bracket.rounds.every((round) => round.matches.every((match) => match.status === "complete"))
+    );
+  const canComplete = scoringComplete && refundsOutstandingCents === 0 && payoutsOutstandingCents === 0;
+
   return {
     session,
     bowlers,
@@ -710,10 +826,39 @@ export function getSessionSnapshot(sessionId: number) {
     scores: scoreRows,
     brackets: bracketSnapshots,
     payoutTotals,
+    paidRefundBowlerIds: [...paidRefundBowlerIds],
+    paidPayoutBowlerIds: [...paidPayoutBowlerIds],
+    completion: {
+      canComplete,
+      scoringComplete,
+      refundsOutstandingCents,
+      payoutsOutstandingCents,
+    },
     requiredScorersByGame: {
       game1: sortedBowlerRows(requiredGame1),
       game2: sortedBowlerRows(requiredGame2),
       game3: sortedBowlerRows(requiredGame3),
     },
   };
+}
+
+export function completeSession(sessionId: number) {
+  assertSessionEditable(sessionId);
+  const snapshot = getSessionSnapshot(sessionId) as {
+    completion: {
+      canComplete: boolean;
+      scoringComplete: boolean;
+      refundsOutstandingCents: number;
+      payoutsOutstandingCents: number;
+    };
+  };
+
+  if (!snapshot.completion.canComplete) {
+    throw new Error(
+      `Session cannot be completed yet (scoringComplete=${snapshot.completion.scoringComplete}, refundsOutstanding=${snapshot.completion.refundsOutstandingCents}, payoutsOutstanding=${snapshot.completion.payoutsOutstandingCents})`
+    );
+  }
+
+  db.query(`UPDATE sessions SET is_completed = 1, completed_at = datetime('now') WHERE id = ?`).run(sessionId);
+  return getSessionSnapshot(sessionId);
 }
