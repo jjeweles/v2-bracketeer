@@ -35,16 +35,117 @@ function compareDisplayNames(a, b) {
   return a.localeCompare(b, undefined, { sensitivity: "base" });
 }
 
+function normalizeImportLine(line) {
+  return String(line ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tryParseImportedBowlerRow(lastName, combined) {
+  const normalized = normalizeImportLine(combined);
+  const match = normalized.match(/^(.*?)\s+\d+\s+\d+\s+.*?\b[MW]\b\s+\d+\s+\d+\s+(\d+)\b/);
+  if (!match) return null;
+  const givenNames = normalizeImportLine(match[1]);
+  const average = Number(match[2]);
+  if (!givenNames || !Number.isFinite(average)) return null;
+  return { name: `${givenNames} ${lastName}`.trim(), average };
+}
+
+async function parseLeagueSecretaryBowlerPdfInBrowser(fileLike) {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const workerSrc = new URL("pdfjs-dist/legacy/build/pdf.worker.mjs", import.meta.url).toString();
+  pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
+
+  const data = new Uint8Array(await fileLike.arrayBuffer());
+  const pdf = await pdfjs.getDocument({ data }).promise;
+  const lines = [];
+
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum += 1) {
+    const page = await pdf.getPage(pageNum);
+    const content = await page.getTextContent();
+    const items = (content.items ?? []).filter((item) => typeof item?.str === "string");
+    let currentY = null;
+    let current = [];
+    for (const item of items) {
+      const y = Array.isArray(item.transform) ? Number(item.transform[5]) : 0;
+      if (currentY != null && Math.abs(y - currentY) > 2 && current.length > 0) {
+        lines.push(normalizeImportLine(current.join(" ")));
+        current = [];
+      }
+      currentY = y;
+      current.push(item.str);
+    }
+    if (current.length > 0) {
+      lines.push(normalizeImportLine(current.join(" ")));
+    }
+  }
+
+  const parsed = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!line || !line.endsWith(",")) continue;
+
+    const lastName = line.slice(0, -1).trim();
+    if (!lastName) continue;
+
+    const chunks = [];
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const next = lines[j];
+      if (!next) continue;
+      if (next.startsWith("League Secretary") || next.startsWith("Page ") || next.startsWith("-- ")) continue;
+      if (next.startsWith("Name Team#")) continue;
+      if (next.endsWith(",")) break;
+
+      chunks.push(next);
+      const candidate = tryParseImportedBowlerRow(lastName, chunks.join(" "));
+      if (candidate) {
+        parsed.push(candidate);
+        i = j;
+        break;
+      }
+    }
+  }
+
+  return parsed;
+}
+
 async function api(path, init) {
+  const isTauri = typeof window !== "undefined" && window.location?.protocol === "tauri:";
+  if (!api._baseUrl) {
+    api._baseUrl = isTauri ? "http://127.0.0.1:31337" : "";
+  }
+  const baseCandidates = isTauri ? [api._baseUrl, "http://127.0.0.1:31337"] : [""];
   const headers = new Headers(init?.headers ?? {});
-  if (!(init?.body instanceof FormData) && !headers.has("content-type")) {
+  const maybeBody = init?.body;
+  const isFormDataBody = Boolean(
+    maybeBody &&
+      typeof maybeBody === "object" &&
+      typeof maybeBody.append === "function" &&
+      typeof maybeBody.get === "function"
+  );
+  if (!isFormDataBody && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
   }
 
-  const res = await fetch(path, {
-    headers,
-    ...init,
-  });
+  let res = null;
+  let lastErr = null;
+  for (const baseUrl of baseCandidates) {
+    try {
+      res = await fetch(`${baseUrl}${path}`, {
+        headers,
+        ...init,
+      });
+      api._baseUrl = baseUrl;
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+
+  if (!res) {
+    throw lastErr ?? new Error("API unavailable");
+  }
 
   let data = null;
   try {
@@ -57,6 +158,15 @@ async function api(path, init) {
     throw new Error(data?.error || `Request failed (${res.status})`);
   }
   return data;
+}
+
+function isUploadFileLike(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof value.size === "number" &&
+      typeof value.arrayBuffer === "function"
+  );
 }
 
 export function App() {
@@ -177,9 +287,21 @@ export function App() {
     void init();
   }, []);
 
-  async function init() {
+async function init() {
     try {
-      const loadedSessions = await loadSessions();
+      let loadedSessions = [];
+      let lastErr = null;
+      for (let attempt = 0; attempt < 15; attempt += 1) {
+        try {
+          loadedSessions = await loadSessions();
+          lastErr = null;
+          break;
+        } catch (err) {
+          lastErr = err;
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        }
+      }
+      if (lastErr) throw lastErr;
       if (loadedSessions.length > 0) {
         const firstId = loadedSessions[0].id;
         setActiveSessionId(firstId);
@@ -193,6 +315,9 @@ export function App() {
 
   async function loadSessions() {
     const data = await api("/api/sessions");
+    if (!data || !Array.isArray(data.sessions)) {
+      throw new Error("API unavailable. If this is desktop build, backend did not start.");
+    }
     setSessions(data.sessions);
     return data.sessions;
   }
@@ -593,15 +718,29 @@ export function App() {
     }
     const form = new FormData(e.currentTarget);
     const file = form.get("bowlerPdf");
-    if (!(file instanceof File) || file.size === 0) {
+    if (!isUploadFileLike(file) || file.size === 0) {
       setStatus("Choose a PDF first");
       return;
     }
     try {
-      const result = await api(`/api/sessions/${activeSessionId}/import-bowlers-pdf`, {
-        method: "POST",
-        body: form,
-      });
+      setStatus("Reading PDF...");
+      const bowlers = await parseLeagueSecretaryBowlerPdfInBrowser(file);
+      let result;
+      try {
+        result = await api(`/api/sessions/${activeSessionId}/import-bowlers`, {
+          method: "POST",
+          body: JSON.stringify({ bowlers }),
+        });
+      } catch (err) {
+        // Backward compatibility for older bundled backends that only support PDF upload endpoint.
+        if (err?.message !== "Not found") {
+          throw err;
+        }
+        result = await api(`/api/sessions/${activeSessionId}/import-bowlers-pdf`, {
+          method: "POST",
+          body: form,
+        });
+      }
       await loadSnapshot(activeSessionId);
       setSelectedBowlerPdfName("");
       e.currentTarget.reset();
@@ -935,7 +1074,13 @@ export function App() {
                     name="bowlerPdf"
                     type="file"
                     accept=".pdf,application/pdf"
-                    onChange={(e) => setSelectedBowlerPdfName(e.target.files?.[0]?.name ?? "")}
+                    onChange={(e) => {
+                      const picked = e.target.files?.[0]?.name;
+                      const fromValue = String(e.target.value ?? "")
+                        .split(/[\\/]/)
+                        .pop();
+                      setSelectedBowlerPdfName(picked || fromValue || "");
+                    }}
                   />
                   <label htmlFor="bowlerPdf" className="file-btn">
                     Choose PDF

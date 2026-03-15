@@ -18,7 +18,82 @@ import {
   upsertGameScores,
 } from "./lib/engine";
 import "./lib/db";
-import { parseLeagueSecretaryBowlerPdf } from "./lib/pdf-import";
+
+let pdfPolyfillsInstalled = false;
+
+function installPdfPolyfills() {
+  if (pdfPolyfillsInstalled) return;
+  pdfPolyfillsInstalled = true;
+
+  const g = globalThis as Record<string, unknown>;
+  if (typeof g.DOMMatrix !== "function") {
+    class SimpleDOMMatrix {
+      a = 1;
+      b = 0;
+      c = 0;
+      d = 1;
+      e = 0;
+      f = 0;
+      constructor(_init?: unknown) {}
+      multiplySelf(): this {
+        return this;
+      }
+      preMultiplySelf(): this {
+        return this;
+      }
+      translateSelf(): this {
+        return this;
+      }
+      scaleSelf(): this {
+        return this;
+      }
+      rotateSelf(): this {
+        return this;
+      }
+      invertSelf(): this {
+        return this;
+      }
+    }
+    g.DOMMatrix = SimpleDOMMatrix;
+  }
+  if (typeof g.ImageData !== "function") {
+    g.ImageData = class ImageData {
+      constructor(_data?: unknown, _width?: unknown, _height?: unknown) {}
+    };
+  }
+  if (typeof g.Path2D !== "function") {
+    g.Path2D = class Path2D {};
+  }
+  if (typeof g.DOMMatrixReadOnly !== "function") {
+    g.DOMMatrixReadOnly = g.DOMMatrix;
+  }
+  if (typeof g.OffscreenCanvas !== "function") {
+    g.OffscreenCanvas = class OffscreenCanvas {
+      constructor(_width?: unknown, _height?: unknown) {}
+      getContext() {
+        return null;
+      }
+    };
+  }
+  if (typeof g.HTMLCanvasElement !== "function") {
+    g.HTMLCanvasElement = class HTMLCanvasElement {};
+  }
+  if (typeof g.CanvasRenderingContext2D !== "function") {
+    g.CanvasRenderingContext2D = class CanvasRenderingContext2D {};
+  }
+}
+
+async function parseLeagueSecretaryBowlerPdf(bytes: Uint8Array) {
+  installPdfPolyfills();
+  const mod = await import("./lib/pdf-import");
+  return mod.parseLeagueSecretaryBowlerPdf(bytes);
+}
+
+function isUploadFileLike(value: unknown): value is { size: number; arrayBuffer: () => Promise<ArrayBuffer> } {
+  if (!value || typeof value !== "object") return false;
+  const maybe = value as { size?: unknown; arrayBuffer?: unknown };
+  return typeof maybe.size === "number" && typeof maybe.arrayBuffer === "function";
+}
 
 const publicDir = join(process.cwd(), "src", "public");
 
@@ -27,6 +102,9 @@ function json(data: unknown, init?: ResponseInit) {
     status: init?.status ?? 200,
     headers: {
       "content-type": "application/json",
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
+      "access-control-allow-headers": "content-type",
       ...(init?.headers ?? {}),
     },
   });
@@ -82,13 +160,26 @@ function staticFile(pathname: string): Response {
   return new Response(content, { headers: { "content-type": type } });
 }
 
+const PORT = Number(process.env.BRACKETEER_PORT ?? 3000);
+
 Bun.serve({
-  port: 3000,
+  port: PORT,
   async fetch(req) {
     const url = new URL(req.url);
     const pathname = url.pathname;
 
     try {
+      if (req.method === "OPTIONS") {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            "access-control-allow-origin": "*",
+            "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
+            "access-control-allow-headers": "content-type",
+          },
+        });
+      }
+
       if (pathname === "/api/sessions" && req.method === "GET") {
         return json({ sessions: listSessions() });
       }
@@ -117,7 +208,7 @@ Bun.serve({
           };
 
           const file = form.get("bowlerPdf");
-          if (file instanceof File && file.size > 0) {
+          if (isUploadFileLike(file) && file.size > 0) {
             bowlerPdf = new Uint8Array(await file.arrayBuffer());
           }
         } else {
@@ -231,7 +322,7 @@ Bun.serve({
         if (!sessionId) return badRequest("Invalid session id");
         const form = await req.formData();
         const file = form.get("bowlerPdf");
-        if (!(file instanceof File) || file.size === 0) {
+        if (!isUploadFileLike(file) || file.size === 0) {
           return badRequest("PDF file is required");
         }
 
@@ -252,6 +343,38 @@ Bun.serve({
           addBowler(sessionId, {
             name: parsed.name,
             average: parsed.average,
+            scratchEntries: 0,
+            handicapEntries: 0,
+          });
+          importedBowlers += 1;
+        }
+
+        return json({ importedBowlers, skippedBowlers });
+      }
+
+      if (pathname.endsWith("/import-bowlers") && req.method === "POST") {
+        const sessionId = parseSessionId(pathname);
+        if (!sessionId) return badRequest("Invalid session id");
+        const body = await req.json();
+        const incoming = Array.isArray(body?.bowlers) ? body.bowlers : [];
+        const existing = listBowlers(sessionId) as { name: string }[];
+        const existingNames = new Set(existing.map((row) => row.name.trim().toLowerCase()));
+        const seen = new Set<string>();
+
+        let importedBowlers = 0;
+        let skippedBowlers = 0;
+        for (const row of incoming) {
+          const name = String(row?.name ?? "").trim();
+          const average = Number(row?.average ?? 0);
+          const key = name.toLowerCase();
+          if (!name || !Number.isFinite(average) || average < 0 || seen.has(key) || existingNames.has(key)) {
+            skippedBowlers += 1;
+            continue;
+          }
+          seen.add(key);
+          addBowler(sessionId, {
+            name,
+            average,
             scratchEntries: 0,
             handicapEntries: 0,
           });
@@ -415,10 +538,16 @@ Bun.serve({
 
       return staticFile(pathname);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unexpected error";
+      const message = error && typeof error === "object" && "message" in error ? String((error as any).message) : "Unexpected error";
+      const stack = error && typeof error === "object" && "stack" in error ? String((error as any).stack) : "";
+      if (stack) {
+        console.error(stack);
+      } else {
+        console.error(error);
+      }
       return json({ error: message }, { status: 500 });
     }
   },
 });
 
-console.log("Server running on http://localhost:3000");
+console.log(`Server running on http://localhost:${PORT}`);

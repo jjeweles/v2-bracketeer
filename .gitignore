@@ -4,3 +4,5 @@ data
 .DS_Store
 src-tauri/target
 target
+src-tauri/resources/bracketeer-server
+src-tauri/resources/bracketeer-server

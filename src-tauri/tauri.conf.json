@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "bun run dev:desktop",
     "devUrl": "http://127.0.0.1:5173",
-    "beforeBuildCommand": "bun run ui:build",
+    "beforeBuildCommand": "bash ./scripts/build-desktop.sh",
     "frontendDist": "../src/public"
   },
   "app": {
@@ -27,6 +27,9 @@
   },
   "bundle": {
     "active": true,
+    "resources": [
+      "resources/bracketeer-server"
+    ],
     "targets": "all",
     "icon": [
       "icons/icon.png"
