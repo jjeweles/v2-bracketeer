@@ -294,6 +294,55 @@ h2 {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
+.file-label {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: #acb1eb;
+}
+
+.file-upload {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(8, 31, 25, 0.7);
+  padding: 0.5rem;
+}
+
+.file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.file-btn {
+  cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.38rem 0.62rem;
+  background: rgba(77, 184, 142, 0.2);
+  color: #e3e6ff;
+  font-size: 0.8rem;
+  text-decoration: none;
+}
+
+.file-name {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.bowler-search-input {
+  width: min(420px, 100%);
+  margin-top: 0.65rem;
+}
+
 label {
   display: flex;
   flex-direction: column;

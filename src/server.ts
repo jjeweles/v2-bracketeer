@@ -12,6 +12,7 @@ import {
   upsertGameScores,
 } from "./lib/engine";
 import "./lib/db";
+import { parseLeagueSecretaryBowlerPdf } from "./lib/pdf-import";
 
 const publicDir = join(process.cwd(), "src", "public");
 
@@ -87,16 +88,77 @@ Bun.serve({
       }
 
       if (pathname === "/api/sessions" && req.method === "POST") {
-        const body = await req.json();
+        const contentType = req.headers.get("content-type") ?? "";
+        let body: {
+          name: string;
+          entryFeeDollars: number;
+          handicapPercent: number;
+          handicapBase: number;
+          payoutFirstDollars: number;
+          payoutSecondDollars: number;
+        };
+        let bowlerPdf: Uint8Array | null = null;
+
+        if (contentType.includes("multipart/form-data")) {
+          const form = await req.formData();
+          body = {
+            name: String(form.get("name") ?? ""),
+            entryFeeDollars: Number(form.get("entryFeeDollars") ?? 5),
+            handicapPercent: Number(form.get("handicapPercent") ?? 80),
+            handicapBase: Number(form.get("handicapBase") ?? 220),
+            payoutFirstDollars: Number(form.get("payoutFirstDollars") ?? 25),
+            payoutSecondDollars: Number(form.get("payoutSecondDollars") ?? 10),
+          };
+
+          const file = form.get("bowlerPdf");
+          if (file instanceof File && file.size > 0) {
+            bowlerPdf = new Uint8Array(await file.arrayBuffer());
+          }
+        } else {
+          const jsonBody = await req.json();
+          body = {
+            name: String(jsonBody.name ?? ""),
+            entryFeeDollars: Number(jsonBody.entryFeeDollars ?? 5),
+            handicapPercent: Number(jsonBody.handicapPercent ?? 80),
+            handicapBase: Number(jsonBody.handicapBase ?? 220),
+            payoutFirstDollars: Number(jsonBody.payoutFirstDollars ?? 25),
+            payoutSecondDollars: Number(jsonBody.payoutSecondDollars ?? 10),
+          };
+        }
+
         const created = createSession({
-          name: String(body.name ?? ""),
-          entryFeeDollars: Number(body.entryFeeDollars ?? 5),
-          handicapPercent: Number(body.handicapPercent ?? 80),
-          handicapBase: Number(body.handicapBase ?? 220),
-          payoutFirstDollars: Number(body.payoutFirstDollars ?? 25),
-          payoutSecondDollars: Number(body.payoutSecondDollars ?? 10),
+          name: body.name,
+          entryFeeDollars: body.entryFeeDollars,
+          handicapPercent: body.handicapPercent,
+          handicapBase: body.handicapBase,
+          payoutFirstDollars: body.payoutFirstDollars,
+          payoutSecondDollars: body.payoutSecondDollars,
         });
-        return json({ session: created });
+
+        let importedBowlers = 0;
+        let skippedBowlers = 0;
+
+        if (bowlerPdf) {
+          const parsedBowlers = await parseLeagueSecretaryBowlerPdf(bowlerPdf);
+          const seen = new Set<string>();
+          for (const parsed of parsedBowlers) {
+            const key = parsed.name.toLowerCase();
+            if (seen.has(key)) {
+              skippedBowlers += 1;
+              continue;
+            }
+            seen.add(key);
+            addBowler((created as { id: number }).id, {
+              name: parsed.name,
+              average: parsed.average,
+              scratchEntries: 0,
+              handicapEntries: 0,
+            });
+            importedBowlers += 1;
+          }
+        }
+
+        return json({ session: created, importedBowlers, skippedBowlers });
       }
 
       if (pathname.endsWith("/snapshot") && req.method === "GET") {
