@@ -26,8 +26,13 @@ function compareDisplayNames(a, b) {
 }
 
 async function api(path, init) {
+  const headers = new Headers(init?.headers ?? {});
+  if (!(init?.body instanceof FormData) && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
+
   const res = await fetch(path, {
-    headers: { "content-type": "application/json" },
+    headers,
     ...init,
   });
 
@@ -51,6 +56,8 @@ export function App() {
   const [status, setStatus] = useState("Ready");
   const [activePage, setActivePage] = useState("session");
   const [gameNumber, setGameNumber] = useState(1);
+  const [bowlerSearchQuery, setBowlerSearchQuery] = useState("");
+  const [selectedBowlerPdfName, setSelectedBowlerPdfName] = useState("");
 
   const [sessionFormDefaults, setSessionFormDefaults] = useState({
     name: "",
@@ -92,6 +99,14 @@ export function App() {
       .sort((a, b) => compareDisplayNames(a.displayName, b.displayName));
   }, [snapshot]);
 
+  const filteredBowlers = useMemo(() => {
+    const q = bowlerSearchQuery.trim().toLowerCase();
+    if (!q) return sortedBowlers;
+    return sortedBowlers.filter((b) => {
+      return b.displayName.toLowerCase().includes(q) || b.name.toLowerCase().includes(q);
+    });
+  }, [sortedBowlers, bowlerSearchQuery]);
+
   const requiredScorers = useMemo(() => {
     if (!snapshot) return [];
     return snapshot.requiredScorersByGame?.[`game${gameNumber}`] ?? [];
@@ -120,6 +135,10 @@ export function App() {
     setHandicapEntriesDrafts(nextHandicap);
     setEditingCell(null);
   }, [snapshot]);
+
+  useEffect(() => {
+    setBowlerSearchQuery("");
+  }, [activeSessionId]);
 
   useEffect(() => {
     const next = {};
@@ -175,13 +194,14 @@ export function App() {
 
   async function onCreateSession(e) {
     e.preventDefault();
-    const form = new FormData(e.currentTarget);
-    const payload = Object.fromEntries(form.entries());
+    const formEl = e.currentTarget;
+    const form = new FormData(formEl);
 
     try {
-      await api("/api/sessions", {
+      setStatus("Creating session...");
+      const created = await api("/api/sessions", {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: form,
       });
 
       const loadedSessions = await loadSessions();
@@ -200,8 +220,16 @@ export function App() {
         payoutFirstDollars: 25,
         payoutSecondDollars: 10,
       });
+      setSelectedBowlerPdfName("");
+      formEl.reset();
 
-      setStatus("Session created");
+      const importedCount = Number(created.importedBowlers ?? 0);
+      const skippedCount = Number(created.skippedBowlers ?? 0);
+      if (importedCount > 0 || skippedCount > 0) {
+        setStatus(`Session created. Imported ${importedCount} bowlers (${skippedCount} skipped).`);
+      } else {
+        setStatus("Session created");
+      }
     } catch (err) {
       setStatus(err.message);
     }
@@ -279,6 +307,7 @@ export function App() {
         body: JSON.stringify(patch),
       });
       await loadSnapshot(activeSessionId);
+      await loadSessions();
       setEditingCell(null);
       setStatus(`${label} updated`);
     } catch (err) {
@@ -566,6 +595,23 @@ export function App() {
                       required
                     />
                   </label>
+                  <div className="file-label">
+                    <span>League Bowler PDF (optional)</span>
+                    <div className="file-upload">
+                      <input
+                        id="bowlerPdf"
+                        className="file-input"
+                        name="bowlerPdf"
+                        type="file"
+                        accept=".pdf,application/pdf"
+                        onChange={(e) => setSelectedBowlerPdfName(e.target.files?.[0]?.name ?? "")}
+                      />
+                      <label htmlFor="bowlerPdf" className="file-btn">
+                        Choose PDF
+                      </label>
+                      <span className="file-name">{selectedBowlerPdfName || "No file selected"}</span>
+                    </div>
+                  </div>
                   <button type="submit">Create Session</button>
                 </form>
               </section>
@@ -648,8 +694,18 @@ export function App() {
                 <button type="submit">Add Bowler</button>
               </form>
 
+              <div className="row">
+                <input
+                  className="bowler-search-input"
+                  type="search"
+                  placeholder="Search bowlers by name..."
+                  value={bowlerSearchQuery}
+                  onChange={(e) => setBowlerSearchQuery(e.target.value)}
+                />
+              </div>
+
               <div className="panel">
-                {sortedBowlers.length === 0 ? (
+                {filteredBowlers.length === 0 ? (
                   <div>No bowlers yet</div>
                 ) : (
                   <table>
@@ -664,7 +720,7 @@ export function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {sortedBowlers.map((bowler) => (
+                      {filteredBowlers.map((bowler) => (
                         <tr key={bowler.id}>
                           <td>
                             {editingCell?.bowlerId === bowler.id && editingCell?.field === "name" ? (

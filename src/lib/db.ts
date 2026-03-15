@@ -7,7 +7,7 @@ mkdirSync(dirname(DB_PATH), { recursive: true });
 
 export const db = new Database(DB_PATH);
 
-const RESET_TO_DEMO_ON_BOOT = true;
+const RESET_TO_DEMO_ON_BOOT = false;
 
 function calculateHandicap(average: number, percent: number, base: number): number {
   const raw = ((base - average) * percent) / 100;
