@@ -136,7 +136,16 @@ export function listBowlers(sessionId: number) {
   return getBowlersStmt.all(sessionId);
 }
 
-export function updateBowlerAverage(sessionId: number, bowlerId: number, average: number) {
+export function updateBowler(
+  sessionId: number,
+  bowlerId: number,
+  input: {
+    name?: string;
+    average?: number;
+    scratchEntries?: number;
+    handicapEntries?: number;
+  }
+) {
   const session = getSessionStmt.get(sessionId) as Session | null;
   if (!session) {
     throw new Error("Session not found");
@@ -147,16 +156,28 @@ export function updateBowlerAverage(sessionId: number, bowlerId: number, average
     throw new Error("Bowler not found");
   }
 
-  const handicapValue = calculateHandicap(average, session.handicap_percent, session.handicap_base);
+  const nextName = input.name == null ? bowler.name : input.name.trim();
+  const nextAverage = input.average == null ? bowler.average : input.average;
+  const nextScratchEntries = input.scratchEntries == null ? bowler.scratch_entries : input.scratchEntries;
+  const nextHandicapEntries = input.handicapEntries == null ? bowler.handicap_entries : input.handicapEntries;
+  const handicapValue = calculateHandicap(nextAverage, session.handicap_percent, session.handicap_base);
 
   const updated = db
     .query(
       `UPDATE bowlers
-       SET average = ?, handicap_value = ?
+       SET name = ?, average = ?, handicap_value = ?, scratch_entries = ?, handicap_entries = ?
        WHERE id = ? AND session_id = ?
        RETURNING *`
     )
-    .get(average, handicapValue, bowlerId, sessionId) as Bowler | null;
+    .get(
+      nextName,
+      nextAverage,
+      handicapValue,
+      nextScratchEntries,
+      nextHandicapEntries,
+      bowlerId,
+      sessionId
+    ) as Bowler | null;
 
   if (!updated) {
     throw new Error("Failed to update bowler");
