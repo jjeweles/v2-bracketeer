@@ -35,86 +35,20 @@ function compareDisplayNames(a, b) {
   return a.localeCompare(b, undefined, { sensitivity: "base" });
 }
 
-function normalizeImportLine(line) {
-  return String(line ?? "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function tryParseImportedBowlerRow(lastName, combined) {
-  const normalized = normalizeImportLine(combined);
-  const match = normalized.match(/^(.*?)\s+\d+\s+\d+\s+.*?\b[MW]\b\s+\d+\s+\d+\s+(\d+)\b/);
-  if (!match) return null;
-  const givenNames = normalizeImportLine(match[1]);
-  const average = Number(match[2]);
-  if (!givenNames || !Number.isFinite(average)) return null;
-  return { name: `${givenNames} ${lastName}`.trim(), average };
-}
-
-async function parseLeagueSecretaryBowlerPdfInBrowser(fileLike) {
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const workerSrc = new URL("pdfjs-dist/legacy/build/pdf.worker.mjs", import.meta.url).toString();
-  pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
-
-  const data = new Uint8Array(await fileLike.arrayBuffer());
-  const pdf = await pdfjs.getDocument({ data }).promise;
-  const lines = [];
-
-  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum += 1) {
-    const page = await pdf.getPage(pageNum);
-    const content = await page.getTextContent();
-    const items = (content.items ?? []).filter((item) => typeof item?.str === "string");
-    let currentY = null;
-    let current = [];
-    for (const item of items) {
-      const y = Array.isArray(item.transform) ? Number(item.transform[5]) : 0;
-      if (currentY != null && Math.abs(y - currentY) > 2 && current.length > 0) {
-        lines.push(normalizeImportLine(current.join(" ")));
-        current = [];
-      }
-      currentY = y;
-      current.push(item.str);
-    }
-    if (current.length > 0) {
-      lines.push(normalizeImportLine(current.join(" ")));
-    }
-  }
-
-  const parsed = [];
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (!line || !line.endsWith(",")) continue;
-
-    const lastName = line.slice(0, -1).trim();
-    if (!lastName) continue;
-
-    const chunks = [];
-    for (let j = i + 1; j < lines.length; j += 1) {
-      const next = lines[j];
-      if (!next) continue;
-      if (next.startsWith("League Secretary") || next.startsWith("Page ") || next.startsWith("-- ")) continue;
-      if (next.startsWith("Name Team#")) continue;
-      if (next.endsWith(",")) break;
-
-      chunks.push(next);
-      const candidate = tryParseImportedBowlerRow(lastName, chunks.join(" "));
-      if (candidate) {
-        parsed.push(candidate);
-        i = j;
-        break;
-      }
-    }
-  }
-
-  return parsed;
-}
-
 async function api(path, init) {
-  const isTauri = typeof window !== "undefined" && window.location?.protocol === "tauri:";
+  const inBrowser = typeof window !== "undefined" && Boolean(window.location);
+  const protocol = inBrowser ? window.location.protocol : "";
+  const host = inBrowser ? window.location.hostname : "";
+  const isTauri = protocol === "tauri:";
+  const shouldTryLocalBackend = isTauri || host === "localhost" || host === "127.0.0.1" || host === "";
   if (!api._baseUrl) {
-    api._baseUrl = isTauri ? "http://127.0.0.1:31337" : "";
+    api._baseUrl = isTauri ? "http://127.0.0.1:31337" : shouldTryLocalBackend ? "http://127.0.0.1:3000" : "";
   }
-  const baseCandidates = isTauri ? [api._baseUrl, "http://127.0.0.1:31337"] : [""];
+  const baseCandidates = isTauri
+    ? ["http://127.0.0.1:31337"]
+    : shouldTryLocalBackend
+    ? [api._baseUrl, "http://127.0.0.1:3000", ""]
+    : [""];
   const headers = new Headers(init?.headers ?? {});
   const maybeBody = init?.body;
   const isFormDataBody = Boolean(
@@ -127,46 +61,43 @@ async function api(path, init) {
     headers.set("content-type", "application/json");
   }
 
-  let res = null;
   let lastErr = null;
+  let lastApiError = null;
   for (const baseUrl of baseCandidates) {
+    const url = `${baseUrl}${path}`;
     try {
-      res = await fetch(`${baseUrl}${path}`, {
+      const res = await fetch(url, {
         headers,
         ...init,
       });
-      api._baseUrl = baseUrl;
-      lastErr = null;
-      break;
+      let data = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+      if (res.ok) {
+        if (data == null || typeof data !== "object") {
+          const raw = await res.text().catch(() => "");
+          throw new Error(`Invalid API response from ${url} (status ${res.status})${raw ? `: ${raw.slice(0, 120)}` : ""}`);
+        }
+        api._baseUrl = baseUrl;
+        return data;
+      }
+      // Keep trying other base URLs when route is not found on this host.
+      if (res.status === 404) {
+        lastApiError = new Error(data?.error || `Request failed (${res.status})`);
+        continue;
+      }
+      throw new Error(
+        `${data?.error || `Request failed (${res.status}) at ${url}`}${data?.details ? `\n${data.details}` : ""}`
+      );
     } catch (err) {
       lastErr = err;
     }
   }
 
-  if (!res) {
-    throw lastErr ?? new Error("API unavailable");
-  }
-
-  let data = null;
-  try {
-    data = await res.json();
-  } catch {
-    data = null;
-  }
-
-  if (!res.ok) {
-    throw new Error(data?.error || `Request failed (${res.status})`);
-  }
-  return data;
-}
-
-function isUploadFileLike(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      typeof value.size === "number" &&
-      typeof value.arrayBuffer === "function"
-  );
+  throw lastErr ?? lastApiError ?? new Error("API unavailable");
 }
 
 export function App() {
@@ -177,7 +108,7 @@ export function App() {
   const [activePage, setActivePage] = useState("session");
   const [gameNumber, setGameNumber] = useState(1);
   const [bowlerSearchQuery, setBowlerSearchQuery] = useState("");
-  const [selectedBowlerPdfName, setSelectedBowlerPdfName] = useState("");
+  const [importErrorDetails, setImportErrorDetails] = useState("");
 
   const [sessionFormDefaults, setSessionFormDefaults] = useState({
     name: "",
@@ -263,7 +194,6 @@ export function App() {
 
   useEffect(() => {
     setBowlerSearchQuery("");
-    setSelectedBowlerPdfName("");
   }, [activeSessionId]);
 
   useEffect(() => {
@@ -302,12 +232,9 @@ async function init() {
         }
       }
       if (lastErr) throw lastErr;
-      if (loadedSessions.length > 0) {
-        const firstId = loadedSessions[0].id;
-        setActiveSessionId(firstId);
-        await loadSnapshot(firstId);
-      }
-      setStatus("Ready");
+      setActiveSessionId(null);
+      setSnapshot(null);
+      setStatus(loadedSessions.length > 0 ? "Ready - select or create a session" : "Ready - create a session");
     } catch (err) {
       setStatus(err.message);
     }
@@ -385,6 +312,12 @@ async function init() {
   }
 
   async function onSessionChange(e) {
+    if (!e.target.value) {
+      setActiveSessionId(null);
+      setSnapshot(null);
+      setStatus("Ready - select or create a session");
+      return;
+    }
     const nextId = Number(e.target.value);
     setActiveSessionId(nextId);
     try {
@@ -708,46 +641,8 @@ async function init() {
 
   async function onImportBowlersPdf(e) {
     e.preventDefault();
-    if (!activeSessionId) {
-      setStatus("Select session first");
-      return;
-    }
-    if (sessionCompleted) {
-      setStatus("Session is completed and read-only");
-      return;
-    }
-    const form = new FormData(e.currentTarget);
-    const file = form.get("bowlerPdf");
-    if (!isUploadFileLike(file) || file.size === 0) {
-      setStatus("Choose a PDF first");
-      return;
-    }
-    try {
-      setStatus("Reading PDF...");
-      const bowlers = await parseLeagueSecretaryBowlerPdfInBrowser(file);
-      let result;
-      try {
-        result = await api(`/api/sessions/${activeSessionId}/import-bowlers`, {
-          method: "POST",
-          body: JSON.stringify({ bowlers }),
-        });
-      } catch (err) {
-        // Backward compatibility for older bundled backends that only support PDF upload endpoint.
-        if (err?.message !== "Not found") {
-          throw err;
-        }
-        result = await api(`/api/sessions/${activeSessionId}/import-bowlers-pdf`, {
-          method: "POST",
-          body: form,
-        });
-      }
-      await loadSnapshot(activeSessionId);
-      setSelectedBowlerPdfName("");
-      e.currentTarget.reset();
-      setStatus(`Imported ${result.importedBowlers} bowlers (${result.skippedBowlers} skipped).`);
-    } catch (err) {
-      setStatus(err.message);
-    }
+    setImportErrorDetails("");
+    setStatus("PDF import is temporarily disabled in desktop builds.");
   }
 
   function renderSessionSummary() {
@@ -976,6 +871,7 @@ async function init() {
                 <h2>Select Session</h2>
                 <div className="row">
                   <select value={activeSessionId ?? ""} onChange={onSessionChange}>
+                    <option value="">-- Select a session --</option>
                     {sessions.map((session) => (
                       <option key={session.id} value={session.id}>
                         {session.name} (#{session.id})
@@ -1065,32 +961,16 @@ async function init() {
                 />
               </div>
 
-              <form className="file-label" onSubmit={onImportBowlersPdf}>
+              <div className="file-label">
                 <div className="file-upload">
                   <span className="file-upload-label">Import Bowlers from League PDF</span>
-                  <input
-                    id="bowlerPdf"
-                    className="file-input"
-                    name="bowlerPdf"
-                    type="file"
-                    accept=".pdf,application/pdf"
-                    onChange={(e) => {
-                      const picked = e.target.files?.[0]?.name;
-                      const fromValue = String(e.target.value ?? "")
-                        .split(/[\\/]/)
-                        .pop();
-                      setSelectedBowlerPdfName(picked || fromValue || "");
-                    }}
-                  />
-                  <label htmlFor="bowlerPdf" className="file-btn">
-                    Choose PDF
-                  </label>
-                  <span className="file-name">{selectedBowlerPdfName || "No file selected"}</span>
-                  <button type="submit" className="button secondary" disabled={sessionCompleted}>
-                    Import PDF
+                  <span className="file-name">Temporarily disabled in desktop build.</span>
+                  <button type="button" className="button secondary" onClick={onImportBowlersPdf}>
+                    Import Disabled
                   </button>
                 </div>
-              </form>
+                {importErrorDetails && <pre className="import-error-details">{importErrorDetails}</pre>}
+              </div>
 
               <div className="panel">
                 {filteredBowlers.length === 0 ? (

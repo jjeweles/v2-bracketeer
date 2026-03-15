@@ -1,8 +1,38 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Bun
 bun.lockb
-data
+
+# Runtime / local data
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Build artifacts
+dist/
+build/
+src/public/assets/
+src-tauri/target/
+target/
+src-tauri/resources/*
+!src-tauri/resources/.gitkeep
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# OS / editor files
 .DS_Store
-src-tauri/target
-target
-src-tauri/resources/bracketeer-server
-src-tauri/resources/bracketeer-server
+Thumbs.db
+.idea/
+.vscode/

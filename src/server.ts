@@ -352,6 +352,41 @@ Bun.serve({
         return json({ importedBowlers, skippedBowlers });
       }
 
+      if (pathname.endsWith("/import-bowlers-bytes") && req.method === "POST") {
+        const sessionId = parseSessionId(pathname);
+        if (!sessionId) return badRequest("Invalid session id");
+        const body = await req.json().catch(() => null);
+        const pdfBase64 = String(body?.pdfBase64 ?? "");
+        if (!pdfBase64) {
+          return badRequest("pdfBase64 is required");
+        }
+
+        const parsedBowlers = await parseLeagueSecretaryBowlerPdf(new Uint8Array(Buffer.from(pdfBase64, "base64")));
+        const existing = listBowlers(sessionId) as { name: string }[];
+        const existingNames = new Set(existing.map((row) => row.name.trim().toLowerCase()));
+        const seen = new Set<string>();
+
+        let importedBowlers = 0;
+        let skippedBowlers = 0;
+        for (const parsed of parsedBowlers) {
+          const key = parsed.name.trim().toLowerCase();
+          if (!key || seen.has(key) || existingNames.has(key)) {
+            skippedBowlers += 1;
+            continue;
+          }
+          seen.add(key);
+          addBowler(sessionId, {
+            name: parsed.name,
+            average: parsed.average,
+            scratchEntries: 0,
+            handicapEntries: 0,
+          });
+          importedBowlers += 1;
+        }
+
+        return json({ importedBowlers, skippedBowlers });
+      }
+
       if (pathname.endsWith("/import-bowlers") && req.method === "POST") {
         const sessionId = parseSessionId(pathname);
         if (!sessionId) return badRequest("Invalid session id");
@@ -545,7 +580,14 @@ Bun.serve({
       } else {
         console.error(error);
       }
-      return json({ error: message }, { status: 500 });
+      const includeDetails = pathname.includes("/import-bowlers-pdf");
+      return json(
+        {
+          error: message,
+          details: includeDetails ? stack : undefined,
+        },
+        { status: 500 }
+      );
     }
   },
 });
