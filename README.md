@@ -4,11 +4,11 @@ Bracket/session management app for bowling side brackets.
 
 ## Stack
 
-- Backend: Bun (`/Users/justinjewell/Documents/codebase/v2-bracketeer/src/server.ts`)
-- Engine + SQLite logic: (`/Users/justinjewell/Documents/codebase/v2-bracketeer/src/lib/engine.ts`, `/Users/justinjewell/Documents/codebase/v2-bracketeer/src/lib/db.ts`)
-- Frontend: React + Vite (`/Users/justinjewell/Documents/codebase/v2-bracketeer/src/ui/App.jsx`)
-- Desktop shell: Tauri (`/Users/justinjewell/Documents/codebase/v2-bracketeer/src-tauri`)
-- DB file: `/Users/justinjewell/Documents/codebase/v2-bracketeer/data/app.db`
+- Backend: Bun (`./src/server.ts`)
+- Engine + SQLite logic: (`./src/lib/engine.ts`, `./src/lib/db.ts`)
+- Frontend: React + Vite (`./src/ui/App.jsx`)
+- Desktop shell: Tauri (`./src-tauri`)
+- DB file: `./data/app.db`
 
 ## Core Workflow
 
