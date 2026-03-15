@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 const PAGE_LABELS = {
   session: "Session",
   bowlers: "Bowlers",
-  brackets: "Brackets + Refunds",
+  brackets: "Brackets",
   scores: "Score Updates",
   payouts: "Payout Summary",
   maintenance: "Maintenance",
@@ -83,6 +83,8 @@ export function App() {
     average: "",
     scratchEntries: 0,
     handicapEntries: 0,
+    payLater: false,
+    allBracketsMode: "off",
   });
 
   const [nameDrafts, setNameDrafts] = useState({});
@@ -98,6 +100,7 @@ export function App() {
     message: "",
   });
   const [refundModalOpen, setRefundModalOpen] = useState(false);
+  const [owedModalOpen, setOwedModalOpen] = useState(false);
   const [addBowlerModalOpen, setAddBowlerModalOpen] = useState(false);
   const [sessionDeleteModal, setSessionDeleteModal] = useState({ open: false, sessionId: null, sessionName: "" });
 
@@ -289,8 +292,14 @@ export function App() {
       return;
     }
 
-    const form = new FormData(e.currentTarget);
-    const payload = Object.fromEntries(form.entries());
+    const payload = {
+      name: bowlerFormDefaults.name,
+      average: Number(bowlerFormDefaults.average),
+      scratchEntries: Number(bowlerFormDefaults.scratchEntries),
+      handicapEntries: Number(bowlerFormDefaults.handicapEntries),
+      payLater: Boolean(bowlerFormDefaults.payLater),
+      allBracketsMode: bowlerFormDefaults.allBracketsMode,
+    };
 
     try {
       await api(`/api/sessions/${activeSessionId}/bowlers`, {
@@ -298,7 +307,14 @@ export function App() {
         body: JSON.stringify(payload),
       });
       await loadSnapshot(activeSessionId);
-      setBowlerFormDefaults({ name: "", average: "", scratchEntries: 0, handicapEntries: 0 });
+      setBowlerFormDefaults({
+        name: "",
+        average: "",
+        scratchEntries: 0,
+        handicapEntries: 0,
+        payLater: false,
+        allBracketsMode: "off",
+      });
       setAddBowlerModalOpen(false);
       setStatus("Bowler added");
     } catch (err) {
@@ -334,6 +350,10 @@ export function App() {
     } catch (err) {
       setStatus(err.message);
     }
+  }
+
+  async function togglePayLater(bowler) {
+    await updateBowlerField(bowler.id, { payLater: !bowler.pay_later }, "Pay later");
   }
 
   function cancelCellEdit(bowlerId, field, sourceBowler) {
@@ -402,6 +422,7 @@ export function App() {
       });
       setSnapshot(nextSnapshot);
       setRefundModalOpen(false);
+      setOwedModalOpen(false);
       setStatus("Brackets generated");
     } catch (err) {
       setStatus(err.message);
@@ -435,6 +456,24 @@ export function App() {
     const isPaid = (snapshot?.paidPayoutBowlerIds ?? []).includes(bowlerId);
     try {
       const nextSnapshot = await api(`/api/sessions/${activeSessionId}/payouts/${bowlerId}/paid`, {
+        method: "PATCH",
+        body: JSON.stringify({ paid: !isPaid }),
+      });
+      setSnapshot(nextSnapshot);
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  async function toggleOwedPaid(bowlerId) {
+    if (!activeSessionId) return;
+    if (sessionCompleted) {
+      setStatus("Session is completed and read-only");
+      return;
+    }
+    const isPaid = (snapshot?.paidOwedBowlerIds ?? []).includes(bowlerId);
+    try {
+      const nextSnapshot = await api(`/api/sessions/${activeSessionId}/owes/${bowlerId}/paid`, {
         method: "PATCH",
         body: JSON.stringify({ paid: !isPaid }),
       });
@@ -591,10 +630,12 @@ export function App() {
 
   const refundTotals = snapshot?.refundTotals ?? [];
   const payouts = snapshot?.payoutTotals ?? [];
+  const owedTotals = snapshot?.owedTotals ?? [];
   const totalRefunds = refundTotals.reduce((acc, row) => acc + row.amountCents, 0);
   const totalPayouts = payouts.reduce((acc, row) => acc + row.amountCents, 0);
   const paidRefundMap = new Set(snapshot?.paidRefundBowlerIds ?? []);
   const paidPayoutMap = new Set(snapshot?.paidPayoutBowlerIds ?? []);
+  const paidOwedMap = new Set(snapshot?.paidOwedBowlerIds ?? []);
   const paidRefundsTotal = refundTotals.reduce((acc, row) => {
     return acc + (paidRefundMap.has(row.bowlerId) ? row.amountCents : 0);
   }, 0);
@@ -603,13 +644,25 @@ export function App() {
   }, 0);
   const outstandingRefunds = snapshot?.completion?.refundsOutstandingCents ?? Math.max(0, totalRefunds - paidRefundsTotal);
   const outstandingPayouts = snapshot?.completion?.payoutsOutstandingCents ?? Math.max(0, totalPayouts - paidPayoutsTotal);
+  const outstandingOwed = snapshot?.completion?.owedOutstandingCents ?? 0;
   const kpis = [
     { label: "Active Bowlers", value: String(snapshot?.bowlers?.length ?? 0) },
     { label: "Generated Brackets", value: String(snapshot?.brackets?.length ?? 0) },
-    { label: "Refunds Outstanding", value: outstandingRefunds === 0 ? "All Refunded" : toMoney(outstandingRefunds) },
-    { label: "Payouts Outstanding", value: outstandingPayouts === 0 ? "All Paid" : toMoney(outstandingPayouts) },
+    {
+      label: "Refunds Outstanding",
+      value: refundTotals.length === 0 ? "" : outstandingRefunds === 0 ? "All Refunded" : toMoney(outstandingRefunds),
+    },
+    {
+      label: "Payouts Outstanding",
+      value: payouts.length === 0 ? "" : outstandingPayouts === 0 ? "All Paid" : toMoney(outstandingPayouts),
+    },
+    {
+      label: "Owed Outstanding",
+      value: owedTotals.length === 0 ? "" : outstandingOwed === 0 ? "Settled" : toMoney(outstandingOwed),
+    },
   ];
   const sessionSummary = renderSessionSummary();
+  const owedByBowler = new Map(owedTotals.map((row) => [row.bowlerId, row.netOwedCents]));
 
   function isGameComplete(game) {
     const required = snapshot?.requiredScorersByGame?.[`game${game}`] ?? [];
@@ -860,13 +913,10 @@ export function App() {
             </header>
 
             <section className="card bowlers-card">
-              <div className="row">
+              <div className="row bowlers-toolbar">
                 <button type="button" onClick={() => setAddBowlerModalOpen(true)} disabled={sessionCompleted}>
                   Add Bowler
                 </button>
-              </div>
-
-              <div className="row">
                 <input
                   className="bowler-search-input"
                   type="search"
@@ -877,8 +927,8 @@ export function App() {
               </div>
 
               <form className="file-label" onSubmit={onImportBowlersPdf}>
-                <span>Import Bowlers from League PDF</span>
                 <div className="file-upload">
+                  <span className="file-upload-label">Import Bowlers from League PDF</span>
                   <input
                     id="bowlerPdf"
                     className="file-input"
@@ -909,6 +959,9 @@ export function App() {
                         <th>Hdcp</th>
                         <th>Scratch Entries</th>
                         <th>Handicap Entries</th>
+                        <th>Pay Later</th>
+                        <th>All Brackets</th>
+                        <th>Owes</th>
                         <th>Actions</th>
                       </tr>
                     </thead>
@@ -1148,6 +1201,38 @@ export function App() {
                               </button>
                             )}
                           </td>
+                          <td>
+                            <button
+                              type="button"
+                              className={`mini-btn ${bowler.pay_later ? "" : "secondary"}`}
+                              disabled={sessionCompleted}
+                              onClick={() => void togglePayLater(bowler)}
+                            >
+                              {bowler.pay_later ? "Yes" : "No"}
+                            </button>
+                          </td>
+                          <td>
+                            <div className="inline-stepper">
+                              <select
+                                value={bowler.all_brackets_mode || "off"}
+                                disabled={sessionCompleted}
+                                onChange={(e) => {
+                                  const mode = e.target.value;
+                                  void updateBowlerField(
+                                    bowler.id,
+                                    { allBracketsMode: mode, allBracketsCount: mode === "off" ? 0 : 1 },
+                                    "All brackets mode"
+                                  );
+                                }}
+                              >
+                                <option value="off">Off</option>
+                                <option value="both">All (Both)</option>
+                                <option value="handicap">All-Handicap</option>
+                                <option value="scratch">All-Scratch</option>
+                              </select>
+                            </div>
+                          </td>
+                          <td>{toMoney(owedByBowler.get(bowler.id) ?? 0)}</td>
                           <td className="actions">
                             <button
                               type="button"
@@ -1171,7 +1256,7 @@ export function App() {
             <header className="page-head">
               <div>
                 <p className="eyebrow">Brackets</p>
-                <h1>Generate brackets and refunds</h1>
+                <h1>Generate brackets</h1>
                 <p className="subhead">Create the bracket structure once the roster is locked.</p>
               </div>
             </header>
@@ -1181,11 +1266,6 @@ export function App() {
                 <button type="button" onClick={onGenerateBrackets} disabled={sessionCompleted}>
                   Generate Brackets
                 </button>
-                {refundTotals.length > 0 && (
-                  <button type="button" className="button secondary" onClick={() => setRefundModalOpen(true)}>
-                    View Refunds
-                  </button>
-                )}
               </div>
 
               <div className="panel">
@@ -1296,6 +1376,18 @@ export function App() {
             </header>
 
             <section className="card">
+              <div className="row">
+                {refundTotals.length > 0 && (
+                  <button type="button" className="button secondary" onClick={() => setRefundModalOpen(true)}>
+                    View Refunds
+                  </button>
+                )}
+                {owedTotals.length > 0 && (
+                  <button type="button" className="button secondary" onClick={() => setOwedModalOpen(true)}>
+                    View Owed
+                  </button>
+                )}
+              </div>
               <div className="panel">
                 {payouts.length === 0
                   ? "No completed brackets yet"
@@ -1447,6 +1539,55 @@ export function App() {
       </div>
 
       <div
+        className={`modal ${owedModalOpen ? "" : "is-hidden"}`}
+        aria-hidden={owedModalOpen ? "false" : "true"}
+        onClick={(e) => {
+          if (e.currentTarget === e.target) {
+            setOwedModalOpen(false);
+          }
+        }}
+      >
+        <div className="modal-card refund-modal-card" role="dialog" aria-modal="true" aria-labelledby="owed-title">
+          <h2 id="owed-title">Amounts Owed</h2>
+          <p>Net owed is bracket cost minus payouts won. Mark paid when payment is received.</p>
+          <div className="refund-list">
+            {owedTotals.length === 0 ? (
+              <div className="refund-empty">No pay-later bowlers in this session.</div>
+            ) : (
+              owedTotals.map((row) => {
+                const isPaid = paidOwedMap.has(row.bowlerId);
+                return (
+                  <div className={`refund-row ${isPaid || row.netOwedCents === 0 ? "is-paid" : ""}`} key={row.bowlerId}>
+                    <div className="refund-meta">
+                      <strong>{row.name}</strong>
+                      <span>
+                        {`Net: ${toMoney(row.netOwedCents)} | Owed: ${toMoney(row.grossOwedCents)} | Won: ${toMoney(
+                          row.payoutCreditCents
+                        )}`}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className={`mini-btn ${isPaid ? "secondary" : ""}`}
+                      onClick={() => void toggleOwedPaid(row.bowlerId)}
+                      disabled={sessionCompleted || row.netOwedCents === 0}
+                    >
+                      {isPaid ? "Undo" : "Mark Received"}
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <div className="modal-actions">
+            <button type="button" className="button secondary" onClick={() => setOwedModalOpen(false)}>
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div
         className={`modal ${sessionDeleteModal.open ? "" : "is-hidden"}`}
         aria-hidden={sessionDeleteModal.open ? "false" : "true"}
         onClick={(e) => {
@@ -1530,6 +1671,39 @@ export function App() {
                 value={bowlerFormDefaults.handicapEntries}
                 onChange={(e) => setBowlerFormDefaults((p) => ({ ...p, handicapEntries: e.target.value }))}
               />
+            </label>
+            <label className="check-label">
+              <input
+                type="checkbox"
+                checked={Boolean(bowlerFormDefaults.payLater)}
+                onChange={(e) => setBowlerFormDefaults((p) => ({ ...p, payLater: e.target.checked }))}
+              />
+              <span>Pay later (track owed amount)</span>
+            </label>
+            <label className="check-label">
+              <span>All Brackets Mode</span>
+              <div className="mode-buttons">
+                {[
+                  { key: "off", label: "Off" },
+                  { key: "both", label: "All (Both)" },
+                  { key: "handicap", label: "All-Handicap" },
+                  { key: "scratch", label: "All-Scratch" },
+                ].map((mode) => (
+                  <button
+                    key={mode.key}
+                    type="button"
+                    className={`mode-btn ${bowlerFormDefaults.allBracketsMode === mode.key ? "is-selected" : ""}`}
+                    onClick={() =>
+                      setBowlerFormDefaults((p) => ({
+                        ...p,
+                        allBracketsMode: mode.key,
+                      }))
+                    }
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
             </label>
             <div className="modal-actions">
               <button type="button" className="button secondary" onClick={() => setAddBowlerModalOpen(false)}>

@@ -11,6 +11,7 @@ import {
   getSessionSnapshot,
   listBowlers,
   listSessions,
+  setOwedPaid,
   setPayoutPaid,
   setRefundPaid,
   updateBowler,
@@ -202,11 +203,25 @@ Bun.serve({
         const sessionId = parseSessionId(pathname);
         if (!sessionId) return badRequest("Invalid session id");
         const body = await req.json();
+        const allBrackets = Boolean(body.allBrackets);
+        const allBracketsMode =
+          body.allBracketsMode === "both" || body.allBracketsMode === "scratch" || body.allBracketsMode === "handicap"
+            ? body.allBracketsMode
+            : allBrackets
+            ? "both"
+            : "off";
+        const allBracketsCount = Number(body.allBracketsCount ?? (allBracketsMode === "off" ? 0 : 1));
+        if (allBracketsMode !== "off" && (!Number.isFinite(allBracketsCount) || allBracketsCount < 1)) {
+          return badRequest("All brackets count must be at least 1 when enabled");
+        }
         const bowler = addBowler(sessionId, {
           name: String(body.name ?? ""),
           average: Number(body.average ?? 0),
           scratchEntries: Number(body.scratchEntries ?? 0),
           handicapEntries: Number(body.handicapEntries ?? 0),
+          payLater: Boolean(body.payLater),
+          allBracketsMode,
+          allBracketsCount,
         });
         return json({ bowler });
       }
@@ -256,6 +271,9 @@ Bun.serve({
           average?: number;
           scratchEntries?: number;
           handicapEntries?: number;
+          payLater?: boolean;
+          allBracketsMode?: "off" | "both" | "scratch" | "handicap";
+          allBracketsCount?: number;
         } = {};
 
         if (body.name != null) {
@@ -283,6 +301,34 @@ Bun.serve({
             return badRequest("Handicap entries must be a non-negative number");
           }
           patch.handicapEntries = handicapEntries;
+        }
+        if (body.payLater != null) {
+          patch.payLater = Boolean(body.payLater);
+        }
+        if (body.allBracketsMode != null) {
+          const allBracketsMode =
+            body.allBracketsMode === "both" ||
+            body.allBracketsMode === "scratch" ||
+            body.allBracketsMode === "handicap" ||
+            body.allBracketsMode === "off"
+              ? body.allBracketsMode
+              : null;
+          if (!allBracketsMode) {
+            return badRequest("Invalid all brackets mode");
+          }
+          patch.allBracketsMode = allBracketsMode;
+        }
+        if (body.allBracketsCount != null) {
+          const allBracketsCount = Number(body.allBracketsCount);
+          if (!Number.isFinite(allBracketsCount) || allBracketsCount < 0) {
+            return badRequest("All brackets count must be a non-negative number");
+          }
+          patch.allBracketsCount = allBracketsCount;
+        }
+        const nextAllEnabled = patch.allBracketsMode;
+        const nextAllCount = patch.allBracketsCount;
+        if (nextAllEnabled && nextAllEnabled !== "off" && nextAllCount != null && nextAllCount < 1) {
+          return badRequest("All brackets count must be at least 1 when enabled");
         }
 
         if (Object.keys(patch).length === 0) {
@@ -315,6 +361,14 @@ Bun.serve({
         if (!sessionId || !bowlerId) return badRequest("Invalid session or bowler id");
         const body = await req.json();
         return json(setPayoutPaid(sessionId, bowlerId, Boolean(body.paid)));
+      }
+
+      if (pathname.includes("/owes/") && pathname.endsWith("/paid") && req.method === "PATCH") {
+        const sessionId = parseSessionId(pathname);
+        const bowlerId = parseResourceId(pathname, "owes");
+        if (!sessionId || !bowlerId) return badRequest("Invalid session or bowler id");
+        const body = await req.json();
+        return json(setOwedPaid(sessionId, bowlerId, Boolean(body.paid)));
       }
 
       if (pathname.endsWith("/generate-brackets") && req.method === "POST") {

@@ -38,6 +38,10 @@ CREATE TABLE IF NOT EXISTS bowlers (
   handicap_value INTEGER NOT NULL,
   scratch_entries INTEGER NOT NULL,
   handicap_entries INTEGER NOT NULL,
+  pay_later INTEGER NOT NULL DEFAULT 0,
+  all_brackets INTEGER NOT NULL DEFAULT 0,
+  all_brackets_count INTEGER NOT NULL DEFAULT 0,
+  all_brackets_mode TEXT NOT NULL DEFAULT 'off',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -93,6 +97,14 @@ CREATE TABLE IF NOT EXISTS payout_payments (
   paid_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(session_id, bowler_id)
 );
+
+CREATE TABLE IF NOT EXISTS owed_payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  bowler_id INTEGER NOT NULL REFERENCES bowlers(id) ON DELETE CASCADE,
+  paid_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(session_id, bowler_id)
+);
 `);
 
 function hasColumn(table: string, column: string): boolean {
@@ -106,6 +118,22 @@ if (!hasColumn("sessions", "is_completed")) {
 
 if (!hasColumn("sessions", "completed_at")) {
   db.exec(`ALTER TABLE sessions ADD COLUMN completed_at TEXT`);
+}
+
+if (!hasColumn("bowlers", "pay_later")) {
+  db.exec(`ALTER TABLE bowlers ADD COLUMN pay_later INTEGER NOT NULL DEFAULT 0`);
+}
+
+if (!hasColumn("bowlers", "all_brackets")) {
+  db.exec(`ALTER TABLE bowlers ADD COLUMN all_brackets INTEGER NOT NULL DEFAULT 0`);
+}
+
+if (!hasColumn("bowlers", "all_brackets_count")) {
+  db.exec(`ALTER TABLE bowlers ADD COLUMN all_brackets_count INTEGER NOT NULL DEFAULT 0`);
+}
+
+if (!hasColumn("bowlers", "all_brackets_mode")) {
+  db.exec(`ALTER TABLE bowlers ADD COLUMN all_brackets_mode TEXT NOT NULL DEFAULT 'off'`);
 }
 
 const seedDemoSession = db.transaction(() => {
