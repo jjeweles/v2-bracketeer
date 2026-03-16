@@ -43,7 +43,7 @@ jobs:
         run: bun run desktop:build
 
       - name: Upload bundles
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: bundles-${{ matrix.os }}
           path: |
@@ -56,7 +56,7 @@ jobs:
 
     steps:
       - name: Download bundle artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           pattern: bundles-*
           merge-multiple: true
