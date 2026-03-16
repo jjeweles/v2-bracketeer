@@ -10,7 +10,8 @@
     "dev:desktop": "concurrently -k \"bun run dev\" \"bun run ui:dev\"",
     "start": "bun src/server.ts",
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build"
+    "desktop:build": "tauri build",
+    "build:desktop-resources": "bun run scripts/build-desktop.ts"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",

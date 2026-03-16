@@ -17,9 +17,14 @@ fn main() {
       }
     };
 
-    let mut backend_path = resource_dir.join("resources").join("bracketeer-server");
+    #[cfg(target_os = "windows")]
+    let backend_file = "bracketeer-server.exe";
+    #[cfg(not(target_os = "windows"))]
+    let backend_file = "bracketeer-server";
+
+    let mut backend_path = resource_dir.join("resources").join(backend_file);
     if !backend_path.exists() {
-      backend_path = resource_dir.join("bracketeer-server");
+      backend_path = resource_dir.join(backend_file);
     }
 
     if !backend_path.exists() {
