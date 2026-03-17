@@ -25,6 +25,7 @@ type Session = {
   payout_first_cents: number;
   payout_second_cents: number;
   is_completed: number;
+  brackets_printed_at: string | null;
   completed_at: string | null;
 };
 
@@ -48,7 +49,7 @@ type BracketSnapshot = {
 };
 
 const getSessionStmt = db.query(
-  `SELECT id, name, entry_fee_cents, handicap_percent, handicap_base, payout_first_cents, payout_second_cents, is_completed, completed_at FROM sessions WHERE id = ?`
+  `SELECT id, name, entry_fee_cents, handicap_percent, handicap_base, payout_first_cents, payout_second_cents, is_completed, brackets_printed_at, completed_at FROM sessions WHERE id = ?`
 );
 const getBowlersStmt = db.query(
   `SELECT id, session_id, name, average, handicap_value, scratch_entries, handicap_entries, pay_later, all_brackets, all_brackets_count, all_brackets_mode
@@ -88,7 +89,7 @@ function allModeAppliesToKind(mode: Bowler["all_brackets_mode"], kind: BracketKi
 export function listSessions() {
   return db
     .query(
-      `SELECT id, name, entry_fee_cents, handicap_percent, handicap_base, payout_first_cents, payout_second_cents, is_completed, completed_at, created_at
+      `SELECT id, name, entry_fee_cents, handicap_percent, handicap_base, payout_first_cents, payout_second_cents, is_completed, brackets_printed_at, completed_at, created_at
        FROM sessions ORDER BY id DESC`
     )
     .all();
@@ -442,6 +443,10 @@ function buildEightManGroups(entryCounts: Map<number, number>) {
 
 export function generateBrackets(sessionId: number) {
   const session = assertSessionEditable(sessionId);
+  const hasExistingScores = db.query(`SELECT 1 FROM bowler_scores WHERE session_id = ? LIMIT 1`).get(sessionId);
+  if (session.brackets_printed_at || hasExistingScores) {
+    throw new Error("Bracket regeneration is locked after scores are entered or brackets are printed");
+  }
 
   const bowlers = getBowlersStmt.all(sessionId) as Bowler[];
 
@@ -517,6 +522,16 @@ export function generateBrackets(sessionId: number) {
     }
   })();
 
+  return getSessionSnapshot(sessionId);
+}
+
+export function markBracketsPrinted(sessionId: number) {
+  assertSessionEditable(sessionId);
+  db.query(
+    `UPDATE sessions
+     SET brackets_printed_at = COALESCE(brackets_printed_at, datetime('now'))
+     WHERE id = ?`
+  ).run(sessionId);
   return getSessionSnapshot(sessionId);
 }
 
@@ -736,6 +751,8 @@ export function upsertGameScores(
 
 export function getSessionSnapshot(sessionId: number) {
   const session = getSessionOrThrow(sessionId);
+  const hasAnyScores = Boolean(db.query(`SELECT 1 FROM bowler_scores WHERE session_id = ? LIMIT 1`).get(sessionId));
+  const bracketRegenerationLocked = Boolean(session.brackets_printed_at || hasAnyScores);
 
   const rawBowlers = getBowlersStmt.all(sessionId) as Bowler[];
   const bowlers = rawBowlers.map((b) => ({
@@ -967,6 +984,8 @@ export function getSessionSnapshot(sessionId: number) {
 
   return {
     session,
+    hasAnyScores,
+    bracketRegenerationLocked,
     bowlers,
     refunds,
     refundTotals,

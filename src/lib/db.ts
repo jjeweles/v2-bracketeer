@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   payout_first_cents INTEGER NOT NULL,
   payout_second_cents INTEGER NOT NULL,
   is_completed INTEGER NOT NULL DEFAULT 0,
+  brackets_printed_at TEXT,
   completed_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -118,6 +119,10 @@ if (!hasColumn("sessions", "is_completed")) {
 
 if (!hasColumn("sessions", "completed_at")) {
   db.exec(`ALTER TABLE sessions ADD COLUMN completed_at TEXT`);
+}
+
+if (!hasColumn("sessions", "brackets_printed_at")) {
+  db.exec(`ALTER TABLE sessions ADD COLUMN brackets_printed_at TEXT`);
 }
 
 if (!hasColumn("bowlers", "pay_later")) {

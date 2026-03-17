@@ -572,6 +572,66 @@ thead th {
   margin-bottom: 0.65rem;
 }
 
+.bracket-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.7rem;
+  margin-bottom: 0.45rem;
+}
+
+.bracket-status {
+  font-size: 0.74rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.52rem;
+  border: 1px solid transparent;
+}
+
+.bracket-status.is-live {
+  color: #d0fbe7;
+  background: rgba(77, 184, 142, 0.18);
+  border-color: rgba(88, 211, 165, 0.4);
+}
+
+.bracket-status.is-complete {
+  color: #f7ffb3;
+  background: rgba(255, 239, 122, 0.16);
+  border-color: rgba(255, 239, 122, 0.35);
+}
+
+.visual-bracket-wrap {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(6, 20, 16, 0.7);
+  overflow-x: auto;
+  padding: 0.3rem;
+  max-width: 100%;
+}
+
+.visual-bracket {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+}
+
+.vb-lines line {
+  stroke: rgba(151, 255, 213, 0.78);
+  stroke-width: 2;
+}
+
+.vb-seed-text text,
+.vb-round-text text {
+  fill: #effff8;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 15px;
+}
+
+.vb-winner-label {
+  fill: #e8ff87;
+  font-weight: 700;
+}
+
 .avg-display {
   width: 100%;
   text-align: left;
@@ -743,6 +803,10 @@ thead th {
   font-size: 0.9rem;
 }
 
+.alive-print-fallback {
+  display: none;
+}
+
 @media (max-width: 1220px) {
   .metric-strip {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -781,5 +845,141 @@ thead th {
 
   .card-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  @page {
+    size: landscape;
+    margin: 10mm;
+  }
+
+  :root {
+    --text: #111111;
+    --muted: #333333;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #111111 !important;
+  }
+
+  .sidebar,
+  .topbar,
+  .page-head,
+  .status,
+  .status-label,
+  .modal,
+  .row {
+    display: none !important;
+  }
+
+  .shell {
+    display: block !important;
+  }
+
+  .content {
+    padding: 0 !important;
+  }
+
+  .page {
+    display: none !important;
+    margin-top: 0 !important;
+  }
+
+  .page.is-active {
+    display: block !important;
+  }
+
+  .card {
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+  }
+
+  .panel {
+    border: none !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .print-brackets-sheet {
+    width: 100% !important;
+  }
+
+  .bracket-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    break-after: page;
+    page-break-after: always;
+    border: 1px solid #999999 !important;
+    background: #ffffff !important;
+    margin-bottom: 10mm !important;
+    color: #111111 !important;
+  }
+
+  .bracket-card:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  .bracket-status {
+    color: #111111 !important;
+    border-color: #555555 !important;
+    background: #ffffff !important;
+  }
+
+  .visual-bracket-wrap {
+    border-color: #b3b3b3 !important;
+    background: #ffffff !important;
+    overflow: visible !important;
+  }
+
+  .visual-bracket {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .vb-lines line {
+    stroke: #222222 !important;
+  }
+
+  .vb-seed-text text,
+  .vb-round-text text,
+  .vb-winner-label {
+    fill: #111111 !important;
+  }
+
+  body.is-printing-alive-list .shell {
+    display: none !important;
+  }
+
+  body.is-printing-alive-list .alive-print-fallback {
+    display: block !important;
+    color: #111111 !important;
+    font-family: Arial, sans-serif !important;
+  }
+
+  body.is-printing-alive-list .alive-print-fallback h1 {
+    margin: 0 0 10px;
+    font-size: 22px;
+  }
+
+  body.is-printing-alive-list .alive-print-fallback h2 {
+    margin: 14px 0 8px;
+    font-size: 18px;
+  }
+
+  body.is-printing-alive-list .alive-print-fallback ol {
+    margin: 0;
+    padding-left: 22px;
+  }
+
+  body.is-printing-alive-list .alive-print-fallback li {
+    margin: 0 0 6px;
+    font-size: 15px;
+    line-height: 1.3;
   }
 }

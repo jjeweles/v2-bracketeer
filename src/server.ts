@@ -11,6 +11,7 @@ import {
   getSessionSnapshot,
   listBowlers,
   listSessions,
+  markBracketsPrinted,
   setOwedPaid,
   setPayoutPaid,
   setRefundPaid,
@@ -533,6 +534,12 @@ Bun.serve({
         const sessionId = parseSessionId(pathname);
         if (!sessionId) return badRequest("Invalid session id");
         return json(generateBrackets(sessionId));
+      }
+
+      if (pathname.endsWith("/mark-brackets-printed") && req.method === "POST") {
+        const sessionId = parseSessionId(pathname);
+        if (!sessionId) return badRequest("Invalid session id");
+        return json(markBracketsPrinted(sessionId));
       }
 
       if (pathname.endsWith("/scores") && req.method === "POST") {
