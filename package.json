@@ -1,6 +1,6 @@
 {
   "name": "bowling-bracket-desktop-core",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +11,8 @@
     "start": "bun src/server.ts",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build",
-    "build:desktop-resources": "bun run scripts/build-desktop.ts"
+    "build:desktop-resources": "bun run scripts/build-desktop.ts",
+    "bump:version": "bun run scripts/bump-version.ts"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",

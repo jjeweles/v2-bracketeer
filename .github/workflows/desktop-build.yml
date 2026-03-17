@@ -66,9 +66,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false
           files: |
             dist/bundles/**/*.dmg
-            dist/bundles/**/*.app.tar.gz
             dist/bundles/**/*.msi
             dist/bundles/**/*.exe
