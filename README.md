@@ -173,4 +173,4 @@ bun run ui:build
 bun run desktop:build
 ```
 
-- Bundles output under `/Users/justinjewell/Documents/codebase/v2-bracketeer/src-tauri/target/release/bundle/`
+- Bundles output under `/v2-bracketeer/src-tauri/target/release/bundle/`

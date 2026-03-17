@@ -1,476 +1,27 @@
-import { useEffect, useMemo, useState } from "react";
-
-const PAGE_LABELS = {
-  session: "Session",
-  bowlers: "Bowlers",
-  brackets: "Brackets",
-  scores: "Score Updates",
-  payouts: "Payout Summary",
-  maintenance: "Maintenance",
-};
-
-const PAGE_REQUIRES_SESSION = {
-  session: false,
-  bowlers: true,
-  brackets: true,
-  scores: true,
-  payouts: true,
-  maintenance: false,
-};
-
-const BRACKET_SEED_LAYOUT = [1, 8, 4, 5, 3, 6, 2, 7];
-
-function toMoney(cents) {
-  return `$${(cents / 100).toFixed(2)}`;
-}
-
-function toDisplayName(fullName) {
-  const trimmed = String(fullName ?? "").trim();
-  if (!trimmed) return "";
-  const parts = trimmed.split(/\s+/);
-  const last = parts.pop() ?? "";
-  const first = parts.join(" ");
-  return first ? `${last}, ${first}` : last;
-}
-
-function compareDisplayNames(a, b) {
-  return a.localeCompare(b, undefined, { sensitivity: "base" });
-}
-
-function truncateLabel(value, max = 30) {
-  const text = String(value ?? "");
-  if (text.length <= max) return text;
-  return `${text.slice(0, max - 1)}...`;
-}
-
-function formatContenderById(bowlerId, options = {}) {
-  const {
-    kind = "scratch",
-    handicapById = new Map(),
-    scoreById = new Map(),
-    nameById = new Map(),
-  } = options;
-  if (bowlerId == null) return "TBD";
-  const name = nameById.get(bowlerId) ?? `#${bowlerId}`;
-  const handicap =
-    kind === "handicap" ? Number(handicapById.get(bowlerId) ?? 0) : null;
-  const score = scoreById.get(bowlerId);
-  if (kind === "handicap") {
-    return score == null
-      ? `${name} (${handicap})`
-      : `${name} (${handicap}) - ${score}`;
-  }
-  return score == null ? name : `${name} - ${score}`;
-}
-
-function getRoundMatch(bracket, roundNumber, matchIndex) {
-  const round = bracket.rounds.find((item) => item.round === roundNumber);
-  return round?.matches?.[matchIndex] ?? null;
-}
-
-function groupDisplay(ids, options = {}) {
-  if (!Array.isArray(ids) || ids.length === 0) return "TBD";
-  return ids
-    .map((bowlerId) => formatContenderById(bowlerId, options))
-    .join(" / ");
-}
-
-function winnerDisplay(bracket, handicapById = new Map()) {
-  const final = getRoundMatch(bracket, 3, 0);
-  if (!final || final.advancers.length === 0) return "TBD";
-  const scoreById = new Map(
-    final.contenders.map((contender) => [contender.bowlerId, contender.score]),
-  );
-  const nameById = new Map(
-    (bracket.seeds ?? []).map((seed) => [seed.bowlerId, seed.bowlerName]),
-  );
-  return final.advancers
-    .map((bowlerId) =>
-      formatContenderById(bowlerId, {
-        kind: bracket.kind,
-        handicapById,
-        scoreById,
-        nameById,
-      }),
-    )
-    .join(" / ");
-}
-
-function buildAliveListByKind(snapshot) {
-  const result = {
-    scratch: [],
-    handicap: [],
-  };
-  const brackets = snapshot?.brackets ?? [];
-
-  for (const kind of ["scratch", "handicap"]) {
-    const enteredById = new Map();
-    const aliveCountById = new Map();
-
-    for (const bracket of brackets.filter((item) => item.kind === kind)) {
-      const aliveInBracket = new Set(
-        (bracket.seeds ?? []).map((seed) => seed.bowlerId),
-      );
-      for (const round of bracket.rounds ?? []) {
-        for (const match of round.matches ?? []) {
-          if (match.status !== "complete") continue;
-          const advancers = new Set(match.advancers ?? []);
-          for (const contender of match.contenders ?? []) {
-            if (!advancers.has(contender.bowlerId)) {
-              aliveInBracket.delete(contender.bowlerId);
-            }
-          }
-        }
-      }
-
-      for (const seed of bracket.seeds ?? []) {
-        enteredById.set(seed.bowlerId, seed.bowlerName);
-      }
-      for (const bowlerId of aliveInBracket) {
-        aliveCountById.set(bowlerId, (aliveCountById.get(bowlerId) ?? 0) + 1);
-      }
-    }
-
-    const rows = Array.from(enteredById.entries()).map(
-      ([bowlerId, bowlerName]) => ({
-        bowlerId,
-        bowlerName,
-        aliveCount: aliveCountById.get(bowlerId) ?? 0,
-      }),
-    );
-    rows.sort((a, b) =>
-      a.bowlerName.localeCompare(b.bowlerName, undefined, {
-        sensitivity: "base",
-      }),
-    );
-    result[kind] = rows;
-  }
-
-  return result;
-}
-
-function VisualBracket({ bracket }) {
-  const seedByNumber = new Map(
-    (bracket.seeds ?? []).map((seed) => [seed.seed, seed]),
-  );
-  const nameById = new Map(
-    (bracket.seeds ?? []).map((seed) => [seed.bowlerId, seed.bowlerName]),
-  );
-  const handicapById = new Map(
-    (bracket.seeds ?? []).map((seed) => [seed.bowlerId, seed.handicapValue]),
-  );
-  const round1 =
-    bracket.rounds.find((round) => round.round === 1)?.matches ?? [];
-  const round2 =
-    bracket.rounds.find((round) => round.round === 2)?.matches ?? [];
-  const final = getRoundMatch(bracket, 3, 0);
-  const g1ScoreByBowlerId = new Map();
-  for (const match of round1) {
-    for (const contender of match.contenders) {
-      if (contender.score != null) {
-        g1ScoreByBowlerId.set(contender.bowlerId, contender.score);
-      }
-    }
-  }
-  const g2ScoreByBowlerId = new Map();
-  for (const match of round2) {
-    for (const contender of match.contenders) {
-      if (contender.score != null) {
-        g2ScoreByBowlerId.set(contender.bowlerId, contender.score);
-      }
-    }
-  }
-  const g3ScoreByBowlerId = new Map();
-  for (const contender of final?.contenders ?? []) {
-    if (contender.score != null) {
-      g3ScoreByBowlerId.set(contender.bowlerId, contender.score);
-    }
-  }
-
-  const seedLabel = (seed) => {
-    const slot = seedByNumber.get(seed);
-    if (!slot) return `${seed}. TBD`;
-    const line = formatContenderById(slot.bowlerId, {
-      kind: bracket.kind,
-      handicapById,
-      scoreById: g1ScoreByBowlerId,
-      nameById,
-    });
-    return `${seed}. ${line}`;
-  };
-
-  const winner = winnerDisplay(bracket, handicapById);
-
-  const points = {
-    seedY: {
-      1: 40,
-      8: 96,
-      4: 176,
-      5: 232,
-      3: 308,
-      6: 364,
-      2: 444,
-      7: 500,
-    },
-    xStart: 24,
-    xRound1: 288,
-    xRound2: 552,
-    xFinal: 840,
-    xWinner: 1048,
-  };
-
-  const pairToMid = (a, b) => (points.seedY[a] + points.seedY[b]) / 2;
-  const r1Top = pairToMid(1, 8);
-  const r1UpperMid = pairToMid(4, 5);
-  const r1LowerMid = pairToMid(3, 6);
-  const r1Bottom = pairToMid(2, 7);
-  const semiTopMid = (r1Top + r1UpperMid) / 2;
-  const semiBottomMid = (r1LowerMid + r1Bottom) / 2;
-  const finalMid = (semiTopMid + semiBottomMid) / 2;
-
-  const firstRoundPairs = [
-    [1, 8],
-    [4, 5],
-    [3, 6],
-    [2, 7],
-  ];
-
-  const r2TopTopGroup = round1[0]?.advancers ?? [];
-  const r2TopBottomGroup = round1[3]?.advancers ?? [];
-  const r2BottomTopGroup = round1[1]?.advancers ?? [];
-  const r2BottomBottomGroup = round1[2]?.advancers ?? [];
-  const finalTopGroup = round2[0]?.advancers ?? [];
-  const finalBottomGroup = round2[1]?.advancers ?? [];
-
-  return (
-    <div className="visual-bracket-wrap">
-      <svg
-        className="visual-bracket"
-        viewBox="0 0 1180 540"
-        role="img"
-        aria-label={`${bracket.kind} bracket`}
-      >
-        <g className="vb-lines">
-          {firstRoundPairs.map(([seedA, seedB]) => {
-            const yA = points.seedY[seedA];
-            const yB = points.seedY[seedB];
-            const midY = (yA + yB) / 2;
-            return (
-              <g key={`${seedA}-${seedB}`}>
-                <line x1={points.xStart} y1={yA} x2={points.xRound1} y2={yA} />
-                <line x1={points.xStart} y1={yB} x2={points.xRound1} y2={yB} />
-                <line x1={points.xRound1} y1={yA} x2={points.xRound1} y2={yB} />
-                <line
-                  x1={points.xRound1}
-                  y1={midY}
-                  x2={points.xRound2}
-                  y2={midY}
-                />
-              </g>
-            );
-          })}
-
-          <line
-            x1={points.xRound2}
-            y1={r1Top}
-            x2={points.xRound2}
-            y2={r1UpperMid}
-          />
-          <line
-            x1={points.xRound2}
-            y1={semiTopMid}
-            x2={points.xFinal}
-            y2={semiTopMid}
-          />
-
-          <line
-            x1={points.xRound2}
-            y1={r1LowerMid}
-            x2={points.xRound2}
-            y2={r1Bottom}
-          />
-          <line
-            x1={points.xRound2}
-            y1={semiBottomMid}
-            x2={points.xFinal}
-            y2={semiBottomMid}
-          />
-
-          <line
-            x1={points.xFinal}
-            y1={semiTopMid}
-            x2={points.xFinal}
-            y2={semiBottomMid}
-          />
-          <line
-            x1={points.xFinal}
-            y1={finalMid}
-            x2={points.xWinner}
-            y2={finalMid}
-          />
-        </g>
-
-        <g className="vb-seed-text">
-          {BRACKET_SEED_LAYOUT.map((seed) => (
-            <text key={seed} x={8} y={points.seedY[seed] - 7}>
-              {truncateLabel(seedLabel(seed), 34)}
-            </text>
-          ))}
-        </g>
-
-        <g className="vb-round-text">
-          <text x={points.xRound1 + 14} y={r1Top - 10}>
-            {truncateLabel(
-              groupDisplay(r2TopTopGroup, {
-                kind: bracket.kind,
-                handicapById,
-                scoreById: g2ScoreByBowlerId,
-                nameById,
-              }),
-              40,
-            )}
-          </text>
-          <text x={points.xRound1 + 14} y={r1UpperMid - 10}>
-            {truncateLabel(
-              groupDisplay(r2TopBottomGroup, {
-                kind: bracket.kind,
-                handicapById,
-                scoreById: g2ScoreByBowlerId,
-                nameById,
-              }),
-              40,
-            )}
-          </text>
-          <text x={points.xRound1 + 14} y={r1LowerMid - 10}>
-            {truncateLabel(
-              groupDisplay(r2BottomTopGroup, {
-                kind: bracket.kind,
-                handicapById,
-                scoreById: g2ScoreByBowlerId,
-                nameById,
-              }),
-              40,
-            )}
-          </text>
-          <text x={points.xRound1 + 14} y={r1Bottom - 10}>
-            {truncateLabel(
-              groupDisplay(r2BottomBottomGroup, {
-                kind: bracket.kind,
-                handicapById,
-                scoreById: g2ScoreByBowlerId,
-                nameById,
-              }),
-              40,
-            )}
-          </text>
-          <text x={points.xRound2 + 14} y={semiTopMid - 10}>
-            {truncateLabel(
-              groupDisplay(finalTopGroup, {
-                kind: bracket.kind,
-                handicapById,
-                scoreById: g3ScoreByBowlerId,
-                nameById,
-              }),
-              40,
-            )}
-          </text>
-          <text x={points.xRound2 + 14} y={semiBottomMid - 10}>
-            {truncateLabel(
-              groupDisplay(finalBottomGroup, {
-                kind: bracket.kind,
-                handicapById,
-                scoreById: g3ScoreByBowlerId,
-                nameById,
-              }),
-              40,
-            )}
-          </text>
-          <text
-            className="vb-winner-label"
-            x={points.xFinal + 2}
-            y={finalMid - 10}
-          >
-            {`Winner: ${truncateLabel(winner, 26)}`}
-          </text>
-        </g>
-      </svg>
-    </div>
-  );
-}
-
-async function api(path, init) {
-  const inBrowser = typeof window !== "undefined" && Boolean(window.location);
-  const protocol = inBrowser ? window.location.protocol : "";
-  const host = inBrowser ? window.location.hostname : "";
-  const isTauri = protocol === "tauri:";
-  const shouldTryLocalBackend =
-    isTauri || host === "localhost" || host === "127.0.0.1" || host === "";
-  if (!api._baseUrl) {
-    api._baseUrl = isTauri
-      ? "http://127.0.0.1:31337"
-      : shouldTryLocalBackend
-        ? "http://127.0.0.1:3000"
-        : "";
-  }
-  const baseCandidates = isTauri
-    ? ["http://127.0.0.1:31337"]
-    : shouldTryLocalBackend
-      ? [api._baseUrl, "http://127.0.0.1:3000", ""]
-      : [""];
-  const headers = new Headers(init?.headers ?? {});
-  const maybeBody = init?.body;
-  const isFormDataBody = Boolean(
-    maybeBody &&
-    typeof maybeBody === "object" &&
-    typeof maybeBody.append === "function" &&
-    typeof maybeBody.get === "function",
-  );
-  if (!isFormDataBody && !headers.has("content-type")) {
-    headers.set("content-type", "application/json");
-  }
-
-  let lastErr = null;
-  let lastApiError = null;
-  for (const baseUrl of baseCandidates) {
-    const url = `${baseUrl}${path}`;
-    try {
-      const res = await fetch(url, {
-        headers,
-        ...init,
-      });
-      let data = null;
-      try {
-        data = await res.json();
-      } catch {
-        data = null;
-      }
-      if (res.ok) {
-        if (data == null || typeof data !== "object") {
-          const raw = await res.text().catch(() => "");
-          throw new Error(
-            `Invalid API response from ${url} (status ${res.status})${raw ? `: ${raw.slice(0, 120)}` : ""}`,
-          );
-        }
-        api._baseUrl = baseUrl;
-        return data;
-      }
-      // Keep trying other base URLs when route is not found on this host.
-      if (res.status === 404) {
-        lastApiError = new Error(
-          data?.error || `Request failed (${res.status})`,
-        );
-        continue;
-      }
-      throw new Error(
-        `${data?.error || `Request failed (${res.status}) at ${url}`}${data?.details ? `\n${data.details}` : ""}`,
-      );
-    } catch (err) {
-      lastErr = err;
-    }
-  }
-
-  throw lastErr ?? lastApiError ?? new Error("API unavailable");
-}
+import { useMemo, useState } from "react";
+import { compareDisplayNames, toDisplayName } from "./lib/format";
+import { useAppEffects } from "./hooks/useAppEffects";
+import { useBracketActions } from "./hooks/useBracketActions";
+import { useBowlerActions } from "./hooks/useBowlerActions";
+import { useDashboardViewModel } from "./hooks/useDashboardViewModel";
+import { usePaymentActions } from "./hooks/usePaymentActions";
+import { useScoreActions } from "./hooks/useScoreActions";
+import { useSessionDataActions } from "./hooks/useSessionDataActions";
+import { useSessionLifecycleActions } from "./hooks/useSessionLifecycleActions";
+import { BracketsPage } from "./pages/BracketsPage";
+import { BowlersPage } from "./pages/BowlersPage";
+import { MaintenancePage } from "./pages/MaintenancePage";
+import { PayoutsPage } from "./pages/PayoutsPage";
+import { ScoresPage } from "./pages/ScoresPage";
+import { SessionPage } from "./pages/SessionPage";
+import { ConfirmDeleteModal } from "./components/modals/ConfirmDeleteModal";
+import { OwedModal } from "./components/modals/OwedModal";
+import { RefundModal } from "./components/modals/RefundModal";
+import { SessionDeleteModal } from "./components/modals/SessionDeleteModal";
+import { AddBowlerModal } from "./components/modals/AddBowlerModal";
+import { DashboardTopbar } from "./components/layout/DashboardTopbar";
+import { MetricStrip } from "./components/layout/MetricStrip";
+import { SidebarNav } from "./components/layout/SidebarNav";
 
 export function App() {
   const [sessions, setSessions] = useState([]);
@@ -550,2153 +101,277 @@ export function App() {
     return snapshot.requiredScorersByGame?.[`game${gameNumber}`] ?? [];
   }, [snapshot, gameNumber]);
 
-  useEffect(() => {
-    if (!hasLoadedSession && activePage !== "session") {
-      setActivePage("session");
-    }
-  }, [hasLoadedSession, activePage]);
-
-  useEffect(() => {
-    const nextName = {};
-    const next = {};
-    const nextScratch = {};
-    const nextHandicap = {};
-    for (const b of snapshot?.bowlers ?? []) {
-      nextName[b.id] = b.name;
-      next[b.id] = String(b.average);
-      nextScratch[b.id] = String(b.scratch_entries);
-      nextHandicap[b.id] = String(b.handicap_entries);
-    }
-    setNameDrafts(nextName);
-    setAverageDrafts(next);
-    setScratchEntriesDrafts(nextScratch);
-    setHandicapEntriesDrafts(nextHandicap);
-    setEditingCell(null);
-  }, [snapshot]);
-
-  useEffect(() => {
-    setBowlerSearchQuery("");
-  }, [activeSessionId]);
-
-  useEffect(() => {
-    const next = {};
-    const existingByBowler = new Map();
-    for (const row of snapshot?.scores ?? []) {
-      if (row.game_number === gameNumber) {
-        existingByBowler.set(row.bowler_id, row.scratch_score);
-      }
-    }
-
-    for (const scorer of requiredScorers) {
-      const existing = existingByBowler.get(scorer.bowlerId);
-      next[scorer.bowlerId] = existing == null ? "" : String(existing);
-    }
-
-    setScoreDrafts(next);
-  }, [snapshot, gameNumber, requiredScorers]);
-
-  useEffect(() => {
-    void init();
-  }, []);
-
-  async function init() {
-    try {
-      let loadedSessions = [];
-      let lastErr = null;
-      for (let attempt = 0; attempt < 15; attempt += 1) {
-        try {
-          loadedSessions = await loadSessions();
-          lastErr = null;
-          break;
-        } catch (err) {
-          lastErr = err;
-          await new Promise((resolve) => setTimeout(resolve, 200));
-        }
-      }
-      if (lastErr) throw lastErr;
-      setActiveSessionId(null);
-      setSnapshot(null);
-      setStatus(
-        loadedSessions.length > 0
-          ? "Ready - select or create a session"
-          : "Ready - create a session",
-      );
-    } catch (err) {
-      setStatus(err.message);
-    }
-  }
-
-  async function loadSessions() {
-    const data = await api("/api/sessions");
-    if (!data || !Array.isArray(data.sessions)) {
-      throw new Error(
-        "API unavailable. If this is desktop build, backend did not start.",
-      );
-    }
-    setSessions(data.sessions);
-    return data.sessions;
-  }
-
-  async function loadSnapshot(sessionId = activeSessionId) {
-    if (!sessionId) {
-      setStatus("Select a session first");
-      return null;
-    }
-
-    const nextSnapshot = await api(`/api/sessions/${sessionId}/snapshot`);
-    setSnapshot(nextSnapshot);
-    return nextSnapshot;
-  }
-
-  async function onCreateSession(e) {
-    e.preventDefault();
-    const formEl = e.currentTarget;
-    const form = new FormData(formEl);
-
-    try {
-      setStatus("Creating session...");
-      const created = await api("/api/sessions", {
-        method: "POST",
-        body: form,
-      });
-
-      const loadedSessions = await loadSessions();
-      const newest = loadedSessions[0]?.id ?? null;
-      setActiveSessionId(newest);
-
-      if (newest) {
-        await loadSnapshot(newest);
-      }
-
-      setSessionFormDefaults({
-        name: "",
-        entryFeeDollars: 5,
-        handicapPercent: 80,
-        handicapBase: 220,
-        payoutFirstDollars: 25,
-        payoutSecondDollars: 10,
-      });
-      formEl.reset();
-
-      const importedCount = Number(created.importedBowlers ?? 0);
-      const skippedCount = Number(created.skippedBowlers ?? 0);
-      if (importedCount > 0 || skippedCount > 0) {
-        setStatus(
-          `Session created. Imported ${importedCount} bowlers (${skippedCount} skipped).`,
-        );
-      } else {
-        setStatus("Session created");
-      }
-    } catch (err) {
-      setStatus(err.message);
-    }
-  }
-
-  async function onRefreshSessions() {
-    try {
-      await loadSessions();
-      setStatus("Sessions refreshed");
-    } catch (err) {
-      setStatus(err.message);
-    }
-  }
-
-  async function onSessionChange(e) {
-    if (!e.target.value) {
-      setActiveSessionId(null);
-      setSnapshot(null);
-      setStatus("Ready - select or create a session");
-      return;
-    }
-    const nextId = Number(e.target.value);
-    setActiveSessionId(nextId);
-    try {
-      await loadSnapshot(nextId);
-      setStatus("Session loaded");
-    } catch (err) {
-      setSnapshot(null);
-      setStatus(err.message);
-    }
-  }
-
-  async function onLoadSnapshot() {
-    try {
-      await loadSnapshot();
-      setStatus("Session loaded");
-    } catch (err) {
-      setSnapshot(null);
-      setStatus(err.message);
-    }
-  }
-
-  async function onAddBowler(e) {
-    e.preventDefault();
-    if (!activeSessionId) {
-      setStatus("Select session first");
-      return;
-    }
-    if (sessionCompleted) {
-      setStatus("Session is completed and read-only");
-      return;
-    }
-
-    const payload = {
-      name: bowlerFormDefaults.name,
-      average: Number(bowlerFormDefaults.average),
-      scratchEntries: Number(bowlerFormDefaults.scratchEntries),
-      handicapEntries: Number(bowlerFormDefaults.handicapEntries),
-      payLater: Boolean(bowlerFormDefaults.payLater),
-      allBracketsMode: bowlerFormDefaults.allBracketsMode,
-    };
-
-    try {
-      await api(`/api/sessions/${activeSessionId}/bowlers`, {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      await loadSnapshot(activeSessionId);
-      setBowlerFormDefaults({
-        name: "",
-        average: "",
-        scratchEntries: 0,
-        handicapEntries: 0,
-        payLater: false,
-        allBracketsMode: "off",
-      });
-      setAddBowlerModalOpen(false);
-      setStatus("Bowler added");
-    } catch (err) {
-      setStatus(err.message);
-    }
-  }
-
-  async function onUpdateAverage(bowlerId) {
-    const average = Number(averageDrafts[bowlerId]);
-    await updateBowlerField(bowlerId, { average }, "Average");
-  }
-
-  async function updateBowlerField(bowlerId, patch, label) {
-    if (!activeSessionId) {
-      setStatus("Select session first");
-      return;
-    }
-    if (sessionCompleted) {
-      setStatus("Session is completed and read-only");
-      return;
-    }
-
-    try {
-      setStatus(`Updating ${label.toLowerCase()}...`);
-      await api(`/api/sessions/${activeSessionId}/bowlers/${bowlerId}`, {
-        method: "PATCH",
-        body: JSON.stringify(patch),
-      });
-      await loadSnapshot(activeSessionId);
-      await loadSessions();
-      setEditingCell(null);
-      setStatus(`${label} updated`);
-    } catch (err) {
-      setStatus(err.message);
-    }
-  }
-
-  async function togglePayLater(bowler) {
-    await updateBowlerField(
-      bowler.id,
-      { payLater: !bowler.pay_later },
-      "Pay later",
-    );
-  }
-
-  function cancelCellEdit(bowlerId, field, sourceBowler) {
-    if (field === "name") {
-      setNameDrafts((prev) => ({ ...prev, [bowlerId]: sourceBowler.name }));
-    }
-    if (field === "average") {
-      setAverageDrafts((prev) => ({
-        ...prev,
-        [bowlerId]: String(sourceBowler.average),
-      }));
-    }
-    if (field === "scratch_entries") {
-      setScratchEntriesDrafts((prev) => ({
-        ...prev,
-        [bowlerId]: String(sourceBowler.scratch_entries),
-      }));
-    }
-    if (field === "handicap_entries") {
-      setHandicapEntriesDrafts((prev) => ({
-        ...prev,
-        [bowlerId]: String(sourceBowler.handicap_entries),
-      }));
-    }
-    setEditingCell(null);
-  }
-
-  function onClickDelete(bowlerId) {
-    if (sessionCompleted) {
-      setStatus("Session is completed and read-only");
-      return;
-    }
-    const hasBrackets = (snapshot?.brackets?.length ?? 0) > 0;
-    setConfirmState({
-      open: true,
-      bowlerId,
-      message: hasBrackets
-        ? "Delete this bowler? Existing brackets and refunds will be cleared and must be regenerated."
-        : "Delete this bowler? This action cannot be undone.",
+  const { init, loadSessions, loadSnapshot, onCreateSession, onRefreshSessions, onSessionChange, onLoadSnapshot } =
+    useSessionDataActions({
+      activeSessionId,
+      setActiveSessionId,
+      setSessions,
+      setSnapshot,
+      setStatus,
+      setSessionFormDefaults,
     });
-  }
+  const { onGenerateBrackets, onPrintBrackets, onPrintAliveList } = useBracketActions({
+    activeSessionId,
+    sessionCompleted,
+    bracketRegenerationLocked,
+    snapshot,
+    setSnapshot,
+    setRefundModalOpen,
+    setOwedModalOpen,
+    setStatus,
+  });
+  const { toggleRefundPaid, togglePayoutPaid, toggleOwedPaid } = usePaymentActions({
+    activeSessionId,
+    sessionCompleted,
+    snapshot,
+    setSnapshot,
+    setStatus,
+  });
+  const {
+    onAddBowler,
+    onUpdateAverage,
+    updateBowlerField,
+    togglePayLater,
+    cancelCellEdit,
+    onClickDelete,
+    confirmDelete,
+    onImportBowlersPdf,
+  } = useBowlerActions({
+    activeSessionId,
+    sessionCompleted,
+    snapshot,
+    averageDrafts,
+    bowlerFormDefaults,
+    confirmState,
+    loadSessions,
+    loadSnapshot,
+    setAddBowlerModalOpen,
+    setBowlerFormDefaults,
+    setConfirmState,
+    setEditingCell,
+    setNameDrafts,
+    setAverageDrafts,
+    setScratchEntriesDrafts,
+    setHandicapEntriesDrafts,
+    setImportErrorDetails,
+    setStatus,
+  });
+  const { game1Complete, game2Complete, onSaveScores } = useScoreActions({
+    activeSessionId,
+    gameNumber,
+    requiredScorers,
+    scoreDrafts,
+    sessionCompleted,
+    setSnapshot,
+    setStatus,
+    snapshot,
+  });
+  const { onCompleteSession, onCloneSession, onAskDeleteSession, onConfirmDeleteSession } = useSessionLifecycleActions({
+    activeSessionId,
+    loadSessions,
+    loadSnapshot,
+    setActiveSessionId,
+    setActivePage,
+    setSessionDeleteModal,
+    setSnapshot,
+    setStatus,
+    sessionDeleteModal,
+  });
 
-  async function confirmDelete() {
-    const bowlerId = confirmState.bowlerId;
-    setConfirmState({ open: false, bowlerId: null, message: "" });
-    if (!Number.isFinite(bowlerId) || !activeSessionId) {
-      return;
-    }
-
-    try {
-      setStatus("Deleting bowler...");
-      await api(`/api/sessions/${activeSessionId}/bowlers/${bowlerId}`, {
-        method: "DELETE",
-      });
-      await loadSnapshot(activeSessionId);
-      setStatus("Bowler deleted");
-    } catch (err) {
-      setStatus(err.message);
-    }
-  }
-
-  async function onGenerateBrackets() {
-    if (!activeSessionId) {
-      setStatus("Select session first");
-      return;
-    }
-    if (sessionCompleted) {
-      setStatus("Session is completed and read-only");
-      return;
-    }
-    if (bracketRegenerationLocked) {
-      setStatus(
-        "Bracket regeneration is locked after scores are entered or brackets are printed",
-      );
-      return;
-    }
-
-    try {
-      const nextSnapshot = await api(
-        `/api/sessions/${activeSessionId}/generate-brackets`,
-        {
-          method: "POST",
-        },
-      );
-      setSnapshot(nextSnapshot);
-      setRefundModalOpen(false);
-      setOwedModalOpen(false);
-      setStatus("Brackets generated");
-    } catch (err) {
-      setStatus(err.message);
-    }
-  }
-
-  async function onPrintBrackets() {
-    if ((snapshot?.brackets?.length ?? 0) === 0) {
-      setStatus("No brackets to print");
-      return;
-    }
-    if (typeof window === "undefined") {
-      setStatus("Printing is unavailable in this environment");
-      return;
-    }
-    if (!activeSessionId) {
-      setStatus("Select session first");
-      return;
-    }
-
-    try {
-      const lockedSnapshot = await api(
-        `/api/sessions/${activeSessionId}/mark-brackets-printed`,
-        {
-          method: "POST",
-        },
-      );
-      setSnapshot(lockedSnapshot);
-    } catch (err) {
-      setStatus(err.message);
-      return;
-    }
-
-    const printWindow = window.open("", "_blank", "noopener,noreferrer");
-    if (!printWindow) {
-      if (typeof window.print === "function") {
-        setStatus("Opening print dialog...");
-        window.print();
-        return;
-      }
-      setStatus("Unable to open print dialog");
-      return;
-    }
-
-    const styles = Array.from(
-      document.querySelectorAll('style, link[rel="stylesheet"]'),
-    )
-      .map((node) => node.outerHTML)
-      .join("\n");
-    const bracketPage = document.querySelector(".page.is-active");
-    const content = bracketPage
-      ? bracketPage.outerHTML
-      : document.body.innerHTML;
-
-    printWindow.document.open();
-    printWindow.document.write(`<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Bracket Print</title>
-    ${styles}
-  </head>
-  <body>
-    <main class="print-brackets-sheet">${content}</main>
-    <script>
-      window.addEventListener("load", function () {
-        setTimeout(function () { window.print(); }, 80);
-      });
-    </script>
-  </body>
-</html>`);
-    printWindow.document.close();
-    printWindow.focus();
-    setStatus("Opening print dialog...");
-  }
-
-  function onPrintAliveList() {
-    if ((snapshot?.brackets?.length ?? 0) === 0) {
-      setStatus("No brackets to print");
-      return;
-    }
-    if (typeof window === "undefined") {
-      setStatus("Printing is unavailable in this environment");
-      return;
-    }
-
-    const alive = buildAliveListByKind(snapshot);
-    const sectionHtml = (title, rows) => {
-      const items =
-        rows.length === 0
-          ? `<li class="alive-empty">No entries</li>`
-          : rows
-              .map(
-                (row) =>
-                  `<li>${row.bowlerName}${row.aliveCount > 0 ? ` (${row.aliveCount})` : ""}</li>`,
-              )
-              .join("");
-      return `<section class="alive-section"><h2>${title}</h2><ol>${items}</ol></section>`;
-    };
-
-    const aliveContentHtml = `
-      <h1>Alive List</h1>
-      ${sectionHtml("Scratch", alive.scratch)}
-      ${sectionHtml("Handicap", alive.handicap)}
-    `;
-
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      const containerId = "alive-print-fallback";
-      let container = document.getElementById(containerId);
-      if (!container) {
-        container = document.createElement("div");
-        container.id = containerId;
-        container.className = "alive-print-fallback";
-        document.body.appendChild(container);
-      }
-      container.innerHTML = aliveContentHtml;
-
-      const cleanup = () => {
-        document.body.classList.remove("is-printing-alive-list");
-        window.removeEventListener("afterprint", cleanup);
-      };
-
-      document.body.classList.add("is-printing-alive-list");
-      window.addEventListener("afterprint", cleanup);
-      setStatus("Opening print dialog...");
-      window.print();
-      return;
-    }
-
-    printWindow.document.open();
-    printWindow.document.write(`<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Alive List</title>
-    <style>
-      @page { size: portrait; margin: 12mm; }
-      body { font-family: Arial, sans-serif; color: #111; margin: 0; }
-      h1 { margin: 0 0 10px; font-size: 22px; }
-      h2 { margin: 14px 0 8px; font-size: 18px; }
-      .alive-section { break-inside: avoid; page-break-inside: avoid; }
-      ol { margin: 0; padding-left: 22px; }
-      li { margin: 0 0 6px; font-size: 15px; line-height: 1.3; }
-      .alive-empty { color: #666; }
-    </style>
-  </head>
-  <body>
-    ${aliveContentHtml}
-    <script>
-      window.addEventListener("load", function () {
-        setTimeout(function () { window.print(); }, 80);
-      });
-    </script>
-  </body>
-</html>`);
-    printWindow.document.close();
-    printWindow.focus();
-    setStatus("Opening print dialog...");
-  }
-
-  async function toggleRefundPaid(bowlerId) {
-    if (!activeSessionId) return;
-    if (sessionCompleted) {
-      setStatus("Session is completed and read-only");
-      return;
-    }
-    const isPaid = (snapshot?.paidRefundBowlerIds ?? []).includes(bowlerId);
-    try {
-      const nextSnapshot = await api(
-        `/api/sessions/${activeSessionId}/refunds/${bowlerId}/paid`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({ paid: !isPaid }),
-        },
-      );
-      setSnapshot(nextSnapshot);
-    } catch (err) {
-      setStatus(err.message);
-    }
-  }
-
-  async function togglePayoutPaid(bowlerId) {
-    if (!activeSessionId) return;
-    if (sessionCompleted) {
-      setStatus("Session is completed and read-only");
-      return;
-    }
-    const isPaid = (snapshot?.paidPayoutBowlerIds ?? []).includes(bowlerId);
-    try {
-      const nextSnapshot = await api(
-        `/api/sessions/${activeSessionId}/payouts/${bowlerId}/paid`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({ paid: !isPaid }),
-        },
-      );
-      setSnapshot(nextSnapshot);
-    } catch (err) {
-      setStatus(err.message);
-    }
-  }
-
-  async function toggleOwedPaid(bowlerId) {
-    if (!activeSessionId) return;
-    if (sessionCompleted) {
-      setStatus("Session is completed and read-only");
-      return;
-    }
-    const isPaid = (snapshot?.paidOwedBowlerIds ?? []).includes(bowlerId);
-    try {
-      const nextSnapshot = await api(
-        `/api/sessions/${activeSessionId}/owes/${bowlerId}/paid`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({ paid: !isPaid }),
-        },
-      );
-      setSnapshot(nextSnapshot);
-    } catch (err) {
-      setStatus(err.message);
-    }
-  }
-
-  async function onCompleteSession() {
-    if (!activeSessionId) return;
-    try {
-      const nextSnapshot = await api(
-        `/api/sessions/${activeSessionId}/complete`,
-        { method: "POST" },
-      );
-      setSnapshot(nextSnapshot);
-      await loadSessions();
-      setStatus("Session marked complete");
-    } catch (err) {
-      setStatus(err.message);
-    }
-  }
-
-  async function onCloneSession() {
-    if (!activeSessionId) return;
-    try {
-      const result = await api(`/api/sessions/${activeSessionId}/clone`, {
-        method: "POST",
-        body: JSON.stringify({}),
-      });
-      await loadSessions();
-      const newId = result?.session?.id;
-      if (newId) {
-        setActiveSessionId(newId);
-        await loadSnapshot(newId);
-        setActivePage("bowlers");
-      }
-      setStatus("New session created from current session");
-    } catch (err) {
-      setStatus(err.message);
-    }
-  }
-
-  function onAskDeleteSession(session) {
-    setSessionDeleteModal({
-      open: true,
-      sessionId: session.id,
-      sessionName: session.name,
-    });
-  }
-
-  async function onConfirmDeleteSession() {
-    const targetId = sessionDeleteModal.sessionId;
-    setSessionDeleteModal({ open: false, sessionId: null, sessionName: "" });
-    if (!Number.isFinite(targetId)) return;
-
-    try {
-      await api(`/api/sessions/${targetId}`, { method: "DELETE" });
-      const loadedSessions = await loadSessions();
-
-      if (activeSessionId === targetId) {
-        const nextId = loadedSessions[0]?.id ?? null;
-        setActiveSessionId(nextId);
-        if (nextId) {
-          await loadSnapshot(nextId);
-        } else {
-          setSnapshot(null);
-          setActivePage("session");
-        }
-      } else if (activeSessionId) {
-        await loadSnapshot(activeSessionId);
-      }
-
-      setStatus("Session deleted");
-    } catch (err) {
-      setStatus(err.message);
-    }
-  }
-
-  async function onSaveScores() {
-    if (!activeSessionId || !snapshot) {
-      setStatus("Select and load a session first");
-      return;
-    }
-    if (sessionCompleted) {
-      setStatus("Session is completed and read-only");
-      return;
-    }
-
-    const scores = [];
-    for (const scorer of requiredScorers) {
-      const value = scoreDrafts[scorer.bowlerId];
-      if (value === "") continue;
-      scores.push({
-        bowlerId: scorer.bowlerId,
-        scratchScore: Number(value),
-      });
-    }
-
-    if (scores.length === 0) {
-      setStatus("No scores entered");
-      return;
-    }
-
-    try {
-      const nextSnapshot = await api(
-        `/api/sessions/${activeSessionId}/scores`,
-        {
-          method: "POST",
-          body: JSON.stringify({ gameNumber, scores }),
-        },
-      );
-      setSnapshot(nextSnapshot);
-      setStatus(`Saved game ${gameNumber} scores`);
-    } catch (err) {
-      setStatus(err.message);
-    }
-  }
-
-  async function onImportBowlersPdf(e) {
-    e.preventDefault();
-    setImportErrorDetails("");
-    setStatus("PDF import is temporarily disabled in desktop builds.");
-  }
-
-  function renderSessionSummary() {
-    if (!snapshot) {
-      return null;
-    }
-
-    const s = snapshot.session;
-    return {
-      name: s.name,
-      entryFee: toMoney(s.entry_fee_cents),
-      handicap: `${s.handicap_percent}% of ${s.handicap_base}`,
-      payoutFirst: toMoney(s.payout_first_cents),
-      payoutSecond: toMoney(s.payout_second_cents),
-      status: s.is_completed ? "Completed" : "Open",
-      completedAt: s.completed_at,
-    };
-  }
-
-  const refundTotals = snapshot?.refundTotals ?? [];
-  const payouts = snapshot?.payoutTotals ?? [];
-  const owedTotals = snapshot?.owedTotals ?? [];
-  const totalRefunds = refundTotals.reduce(
-    (acc, row) => acc + row.amountCents,
-    0,
-  );
-  const totalPayouts = payouts.reduce((acc, row) => acc + row.amountCents, 0);
-  const paidRefundMap = new Set(snapshot?.paidRefundBowlerIds ?? []);
-  const paidPayoutMap = new Set(snapshot?.paidPayoutBowlerIds ?? []);
-  const paidOwedMap = new Set(snapshot?.paidOwedBowlerIds ?? []);
-  const paidRefundsTotal = refundTotals.reduce((acc, row) => {
-    return acc + (paidRefundMap.has(row.bowlerId) ? row.amountCents : 0);
-  }, 0);
-  const paidPayoutsTotal = payouts.reduce((acc, row) => {
-    return acc + (paidPayoutMap.has(row.bowlerId) ? row.amountCents : 0);
-  }, 0);
-  const outstandingRefunds =
-    snapshot?.completion?.refundsOutstandingCents ??
-    Math.max(0, totalRefunds - paidRefundsTotal);
-  const outstandingPayouts =
-    snapshot?.completion?.payoutsOutstandingCents ??
-    Math.max(0, totalPayouts - paidPayoutsTotal);
-  const outstandingOwed = snapshot?.completion?.owedOutstandingCents ?? 0;
-  const kpis = [
-    { label: "Active Bowlers", value: String(snapshot?.bowlers?.length ?? 0) },
-    {
-      label: "Generated Brackets",
-      value: String(snapshot?.brackets?.length ?? 0),
-    },
-    {
-      label: "Refunds Outstanding",
-      value:
-        refundTotals.length === 0
-          ? ""
-          : outstandingRefunds === 0
-            ? "All Refunded"
-            : toMoney(outstandingRefunds),
-    },
-    {
-      label: "Payouts Outstanding",
-      value:
-        payouts.length === 0
-          ? ""
-          : outstandingPayouts === 0
-            ? "All Paid"
-            : toMoney(outstandingPayouts),
-    },
-    {
-      label: "Owed Outstanding",
-      value:
-        owedTotals.length === 0
-          ? ""
-          : outstandingOwed === 0
-            ? "Settled"
-            : toMoney(outstandingOwed),
-    },
-  ];
-  const sessionSummary = renderSessionSummary();
-  const owedByBowler = new Map(
-    owedTotals.map((row) => [row.bowlerId, row.netOwedCents]),
-  );
-
-  function isGameComplete(game) {
-    const required = snapshot?.requiredScorersByGame?.[`game${game}`] ?? [];
-    if (required.length === 0) return false;
-    const saved = new Set(
-      (snapshot?.scores ?? [])
-        .filter((row) => row.game_number === game)
-        .map((row) => row.bowler_id),
-    );
-    return required.every((row) => saved.has(row.bowlerId));
-  }
-
-  const game1Complete = isGameComplete(1);
-  const game2Complete = isGameComplete(2);
-
-  useEffect(() => {
-    if (gameNumber === 3 && !game2Complete) {
-      setGameNumber(game1Complete ? 2 : 1);
-      return;
-    }
-    if (gameNumber === 2 && !game1Complete) {
-      setGameNumber(1);
-    }
-  }, [gameNumber, game1Complete, game2Complete]);
+  const {
+    sessionSummary,
+    refundTotals,
+    payouts,
+    owedTotals,
+    paidRefundMap,
+    paidPayoutMap,
+    paidOwedMap,
+    kpis,
+    owedByBowler,
+  } = useDashboardViewModel(snapshot);
+  useAppEffects({
+    hasLoadedSession,
+    activePage,
+    setActivePage,
+    snapshot,
+    setNameDrafts,
+    setAverageDrafts,
+    setScratchEntriesDrafts,
+    setHandicapEntriesDrafts,
+    setEditingCell,
+    activeSessionId,
+    setBowlerSearchQuery,
+    gameNumber,
+    requiredScorers,
+    setScoreDrafts,
+    init,
+    game1Complete,
+    game2Complete,
+    setGameNumber,
+  });
 
   return (
     <>
       <div className="shell">
-        <aside className="sidebar">
-          <div className="brand">
-            <div className="brand-mark">BB</div>
-            <div>
-              <div className="brand-title">Bracket Manager</div>
-              <div className="brand-sub">League control center</div>
-            </div>
-          </div>
-
-          <div className="session-chip">
-            {snapshot?.session
-              ? `${snapshot.session.name} (#${snapshot.session.id})`
-              : "No session selected"}
-          </div>
-
-          <nav className="nav">
-            {Object.entries(PAGE_LABELS).map(([key, label]) => {
-              const requiresSession = PAGE_REQUIRES_SESSION[key];
-              const hidden = requiresSession && !hasLoadedSession;
-              const locked = requiresSession && !hasLoadedSession;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  className={`nav-item ${activePage === key ? "is-active" : ""} ${hidden ? "is-hidden" : ""} ${locked ? "is-locked" : ""}`}
-                  onClick={() => {
-                    if (!locked) setActivePage(key);
-                  }}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </nav>
-
-          <div className="sidebar-footer">
-            <div className="status-label">Status</div>
-            <div className="status">{status}</div>
-          </div>
-        </aside>
+        <SidebarNav
+          snapshot={snapshot}
+          hasLoadedSession={hasLoadedSession}
+          activePage={activePage}
+          setActivePage={setActivePage}
+          status={status}
+        />
 
         <main className="content">
-          <header className="topbar">
-            <div className="topbar-title">
-              <p>League Night Dashboard</p>
-            </div>
-            <div className="topbar-actions">
-              <span className="pill">
-                {snapshot?.session
-                  ? `Session #${snapshot.session.id}`
-                  : "No Session"}
-              </span>
-              {sessionCompleted && (
-                <span className="pill complete-pill">Completed</span>
-              )}
-              <span className="pill status-pill">{status}</span>
-            </div>
-          </header>
+          <DashboardTopbar
+            snapshot={snapshot}
+            sessionCompleted={sessionCompleted}
+            status={status}
+          />
+          <MetricStrip kpis={kpis} />
 
-          <section className="metric-strip">
-            {kpis.map((kpi) => (
-              <article key={kpi.label} className="metric-card">
-                <p>{kpi.label}</p>
-                <h3>{kpi.value}</h3>
-              </article>
-            ))}
-          </section>
+          <SessionPage
+            active={activePage === "session"}
+            sessionFormDefaults={sessionFormDefaults}
+            setSessionFormDefaults={setSessionFormDefaults}
+            onCreateSession={onCreateSession}
+            activeSessionId={activeSessionId}
+            onSessionChange={onSessionChange}
+            sessions={sessions}
+            onRefreshSessions={onRefreshSessions}
+            onLoadSnapshot={onLoadSnapshot}
+            onCloneSession={onCloneSession}
+            onCompleteSession={onCompleteSession}
+            hasLoadedSession={hasLoadedSession}
+            canCompleteSession={
+              Boolean(snapshot?.completion?.canComplete) && !sessionCompleted
+            }
+            sessionSummary={sessionSummary}
+          />
 
-          <section
-            className={`page ${activePage === "session" ? "is-active" : ""}`}
-          >
-            <header className="page-head">
-              <div>
-                <p className="eyebrow">Session Hub</p>
-                <h1>Start or load a session</h1>
-                <p className="subhead">
-                  Create a new session or select an existing one. Once loaded,
-                  the rest of the workflow unlocks.
-                </p>
-              </div>
-            </header>
+          <BowlersPage
+            active={activePage === "bowlers"}
+            sessionCompleted={sessionCompleted}
+            onOpenAddBowler={() => setAddBowlerModalOpen(true)}
+            bowlerSearchQuery={bowlerSearchQuery}
+            setBowlerSearchQuery={setBowlerSearchQuery}
+            onImportBowlersPdf={onImportBowlersPdf}
+            importErrorDetails={importErrorDetails}
+            filteredBowlers={filteredBowlers}
+            editingCell={editingCell}
+            setEditingCell={setEditingCell}
+            nameDrafts={nameDrafts}
+            setNameDrafts={setNameDrafts}
+            averageDrafts={averageDrafts}
+            setAverageDrafts={setAverageDrafts}
+            scratchEntriesDrafts={scratchEntriesDrafts}
+            setScratchEntriesDrafts={setScratchEntriesDrafts}
+            handicapEntriesDrafts={handicapEntriesDrafts}
+            setHandicapEntriesDrafts={setHandicapEntriesDrafts}
+            onUpdateAverage={onUpdateAverage}
+            updateBowlerField={updateBowlerField}
+            cancelCellEdit={cancelCellEdit}
+            togglePayLater={togglePayLater}
+            owedByBowler={owedByBowler}
+            onClickDelete={onClickDelete}
+          />
 
-            <div className="card-grid">
-              <section className="card">
-                <h2>Create Session</h2>
-                <form className="grid" onSubmit={onCreateSession}>
-                  <label>
-                    Session Name
-                    <input
-                      required
-                      name="name"
-                      placeholder="Thursday League Night"
-                      value={sessionFormDefaults.name}
-                      onChange={(e) =>
-                        setSessionFormDefaults((p) => ({
-                          ...p,
-                          name: e.target.value,
-                        }))
-                      }
-                    />
-                  </label>
-                  <label>
-                    Entry Fee ($)
-                    <input
-                      name="entryFeeDollars"
-                      type="number"
-                      step="0.01"
-                      value={sessionFormDefaults.entryFeeDollars}
-                      onChange={(e) =>
-                        setSessionFormDefaults((p) => ({
-                          ...p,
-                          entryFeeDollars: e.target.value,
-                        }))
-                      }
-                      required
-                    />
-                  </label>
-                  <label>
-                    Handicap %
-                    <input
-                      name="handicapPercent"
-                      type="number"
-                      value={sessionFormDefaults.handicapPercent}
-                      onChange={(e) =>
-                        setSessionFormDefaults((p) => ({
-                          ...p,
-                          handicapPercent: e.target.value,
-                        }))
-                      }
-                      required
-                    />
-                  </label>
-                  <label>
-                    Handicap Base
-                    <input
-                      name="handicapBase"
-                      type="number"
-                      value={sessionFormDefaults.handicapBase}
-                      onChange={(e) =>
-                        setSessionFormDefaults((p) => ({
-                          ...p,
-                          handicapBase: e.target.value,
-                        }))
-                      }
-                      required
-                    />
-                  </label>
-                  <label>
-                    1st Payout ($)
-                    <input
-                      name="payoutFirstDollars"
-                      type="number"
-                      step="0.01"
-                      value={sessionFormDefaults.payoutFirstDollars}
-                      onChange={(e) =>
-                        setSessionFormDefaults((p) => ({
-                          ...p,
-                          payoutFirstDollars: e.target.value,
-                        }))
-                      }
-                      required
-                    />
-                  </label>
-                  <label>
-                    2nd Payout ($)
-                    <input
-                      name="payoutSecondDollars"
-                      type="number"
-                      step="0.01"
-                      value={sessionFormDefaults.payoutSecondDollars}
-                      onChange={(e) =>
-                        setSessionFormDefaults((p) => ({
-                          ...p,
-                          payoutSecondDollars: e.target.value,
-                        }))
-                      }
-                      required
-                    />
-                  </label>
-                  <button type="submit">Create Session</button>
-                </form>
-              </section>
+          <BracketsPage
+            active={activePage === "brackets"}
+            sessionCompleted={sessionCompleted}
+            bracketRegenerationLocked={bracketRegenerationLocked}
+            brackets={snapshot?.brackets ?? []}
+            onGenerateBrackets={onGenerateBrackets}
+            onPrintAliveList={onPrintAliveList}
+            onPrintBrackets={() => void onPrintBrackets()}
+          />
 
-              <section className="card">
-                <h2>Select Session</h2>
-                <div className="row">
-                  <select
-                    value={activeSessionId ?? ""}
-                    onChange={onSessionChange}
-                  >
-                    <option value="">-- Select a session --</option>
-                    {sessions.map((session) => (
-                      <option key={session.id} value={session.id}>
-                        {session.name} (#{session.id})
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    className="button secondary"
-                    type="button"
-                    onClick={onRefreshSessions}
-                  >
-                    Refresh
-                  </button>
-                  <button
-                    className="button secondary"
-                    type="button"
-                    onClick={onLoadSnapshot}
-                  >
-                    Load Session
-                  </button>
-                  <button
-                    className="button secondary"
-                    type="button"
-                    onClick={onCloneSession}
-                    disabled={!hasLoadedSession}
-                  >
-                    New From This Session
-                  </button>
-                  <button
-                    className="button secondary"
-                    type="button"
-                    onClick={onCompleteSession}
-                    disabled={
-                      !snapshot?.completion?.canComplete || sessionCompleted
-                    }
-                  >
-                    Complete Session
-                  </button>
-                </div>
-                <div className="panel session-summary-panel">
-                  {!sessionSummary ? (
-                    <div>No session loaded yet.</div>
-                  ) : (
-                    <>
-                      <div className="summary-row">
-                        <span>Session</span>
-                        <strong>{sessionSummary.name}</strong>
-                      </div>
-                      <div className="summary-row">
-                        <span>Entry Fee</span>
-                        <strong>{sessionSummary.entryFee}</strong>
-                      </div>
-                      <div className="summary-row">
-                        <span>Handicap</span>
-                        <strong>{sessionSummary.handicap}</strong>
-                      </div>
-                      <div className="summary-row">
-                        <span>1st Payout</span>
-                        <strong>{sessionSummary.payoutFirst}</strong>
-                      </div>
-                      <div className="summary-row">
-                        <span>2nd Payout</span>
-                        <strong>{sessionSummary.payoutSecond}</strong>
-                      </div>
-                      <div className="summary-row">
-                        <span>Status</span>
-                        <strong>{sessionSummary.status}</strong>
-                      </div>
-                      {sessionSummary.completedAt && (
-                        <div className="summary-row">
-                          <span>Completed At</span>
-                          <strong>{sessionSummary.completedAt}</strong>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              </section>
-            </div>
-          </section>
+          <ScoresPage
+            active={activePage === "scores"}
+            gameNumber={gameNumber}
+            setGameNumber={setGameNumber}
+            game1Complete={game1Complete}
+            game2Complete={game2Complete}
+            onSaveScores={onSaveScores}
+            sessionCompleted={sessionCompleted}
+            requiredScorers={requiredScorers}
+            scoreDrafts={scoreDrafts}
+            onScoreChange={(bowlerId, value) =>
+              setScoreDrafts((prev) => ({
+                ...prev,
+                [bowlerId]: value,
+              }))
+            }
+          />
 
-          <section
-            className={`page ${activePage === "bowlers" ? "is-active" : ""}`}
-          >
-            <header className="page-head">
-              <div>
-                <p className="eyebrow">Roster</p>
-                <h1>Add bowlers</h1>
-                <p className="subhead">
-                  Capture roster details before generating brackets.
-                </p>
-              </div>
-            </header>
+          <PayoutsPage
+            active={activePage === "payouts"}
+            refundTotals={refundTotals}
+            owedTotals={owedTotals}
+            payouts={payouts}
+            paidPayoutMap={paidPayoutMap}
+            sessionCompleted={sessionCompleted}
+            onOpenRefundModal={() => setRefundModalOpen(true)}
+            onOpenOwedModal={() => setOwedModalOpen(true)}
+            onTogglePayoutPaid={(bowlerId) => void togglePayoutPaid(bowlerId)}
+          />
 
-            <section className="card bowlers-card">
-              <div className="row bowlers-toolbar">
-                <button
-                  type="button"
-                  onClick={() => setAddBowlerModalOpen(true)}
-                  disabled={sessionCompleted}
-                >
-                  Add Bowler
-                </button>
-                <input
-                  className="bowler-search-input"
-                  type="search"
-                  placeholder="Search bowlers by name..."
-                  value={bowlerSearchQuery}
-                  onChange={(e) => setBowlerSearchQuery(e.target.value)}
-                />
-              </div>
-
-              <div className="file-label">
-                <div className="file-upload">
-                  <span className="file-upload-label">
-                    Import Bowlers from League PDF
-                  </span>
-                  <span className="file-name">
-                    Temporarily disabled in desktop build.
-                  </span>
-                  <button
-                    type="button"
-                    className="button secondary"
-                    onClick={onImportBowlersPdf}
-                  >
-                    Import Disabled
-                  </button>
-                </div>
-                {importErrorDetails && (
-                  <pre className="import-error-details">
-                    {importErrorDetails}
-                  </pre>
-                )}
-              </div>
-
-              <div className="panel">
-                {filteredBowlers.length === 0 ? (
-                  <div>No bowlers yet</div>
-                ) : (
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Name</th>
-                        <th>Avg</th>
-                        <th>Hdcp</th>
-                        <th>Scratch Entries</th>
-                        <th>Handicap Entries</th>
-                        <th>Pay Later</th>
-                        <th>All Brackets</th>
-                        <th>Owes</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredBowlers.map((bowler) => (
-                        <tr key={bowler.id}>
-                          <td>
-                            {editingCell?.bowlerId === bowler.id &&
-                            editingCell?.field === "name" ? (
-                              <div className="avg-edit-wrap">
-                                <input
-                                  className="avg-input"
-                                  autoFocus
-                                  value={nameDrafts[bowler.id] ?? ""}
-                                  onChange={(e) => {
-                                    const next = e.target.value;
-                                    setNameDrafts((prev) => ({
-                                      ...prev,
-                                      [bowler.id]: next,
-                                    }));
-                                  }}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                      e.preventDefault();
-                                      const name = String(
-                                        nameDrafts[bowler.id] ?? "",
-                                      ).trim();
-                                      void updateBowlerField(
-                                        bowler.id,
-                                        { name },
-                                        "Name",
-                                      );
-                                    }
-                                    if (e.key === "Escape") {
-                                      e.preventDefault();
-                                      cancelCellEdit(bowler.id, "name", bowler);
-                                    }
-                                  }}
-                                />
-                                <button
-                                  type="button"
-                                  className="mini-btn"
-                                  disabled={sessionCompleted}
-                                  onClick={() => {
-                                    const name = String(
-                                      nameDrafts[bowler.id] ?? "",
-                                    ).trim();
-                                    void updateBowlerField(
-                                      bowler.id,
-                                      { name },
-                                      "Name",
-                                    );
-                                  }}
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  type="button"
-                                  className="mini-btn secondary"
-                                  onClick={() =>
-                                    cancelCellEdit(bowler.id, "name", bowler)
-                                  }
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                className="avg-display"
-                                disabled={sessionCompleted}
-                                onClick={() => {
-                                  setNameDrafts((prev) => ({
-                                    ...prev,
-                                    [bowler.id]: bowler.name,
-                                  }));
-                                  setEditingCell({
-                                    bowlerId: bowler.id,
-                                    field: "name",
-                                  });
-                                }}
-                              >
-                                {bowler.displayName}
-                              </button>
-                            )}
-                          </td>
-                          <td>
-                            {editingCell?.bowlerId === bowler.id &&
-                            editingCell?.field === "average" ? (
-                              <div className="avg-edit-wrap">
-                                <input
-                                  className="avg-input"
-                                  type="number"
-                                  min="0"
-                                  autoFocus
-                                  value={averageDrafts[bowler.id] ?? ""}
-                                  onChange={(e) => {
-                                    const next = e.target.value;
-                                    setAverageDrafts((prev) => ({
-                                      ...prev,
-                                      [bowler.id]: next,
-                                    }));
-                                  }}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                      e.preventDefault();
-                                      void onUpdateAverage(bowler.id);
-                                    }
-                                    if (e.key === "Escape") {
-                                      e.preventDefault();
-                                      cancelCellEdit(
-                                        bowler.id,
-                                        "average",
-                                        bowler,
-                                      );
-                                    }
-                                  }}
-                                />
-                                <button
-                                  type="button"
-                                  className="mini-btn"
-                                  disabled={sessionCompleted}
-                                  onClick={() =>
-                                    void onUpdateAverage(bowler.id)
-                                  }
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  type="button"
-                                  className="mini-btn secondary"
-                                  onClick={() =>
-                                    cancelCellEdit(bowler.id, "average", bowler)
-                                  }
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                className="avg-display"
-                                disabled={sessionCompleted}
-                                onClick={() => {
-                                  setAverageDrafts((prev) => ({
-                                    ...prev,
-                                    [bowler.id]: String(bowler.average),
-                                  }));
-                                  setEditingCell({
-                                    bowlerId: bowler.id,
-                                    field: "average",
-                                  });
-                                }}
-                              >
-                                {bowler.average}
-                              </button>
-                            )}
-                          </td>
-                          <td>{bowler.handicap_value}</td>
-                          <td>
-                            {editingCell?.bowlerId === bowler.id &&
-                            editingCell?.field === "scratch_entries" ? (
-                              <div className="avg-edit-wrap">
-                                <input
-                                  className="avg-input"
-                                  type="number"
-                                  min="0"
-                                  autoFocus
-                                  value={scratchEntriesDrafts[bowler.id] ?? ""}
-                                  onChange={(e) => {
-                                    const next = e.target.value;
-                                    setScratchEntriesDrafts((prev) => ({
-                                      ...prev,
-                                      [bowler.id]: next,
-                                    }));
-                                  }}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                      e.preventDefault();
-                                      const scratchEntries = Number(
-                                        scratchEntriesDrafts[bowler.id],
-                                      );
-                                      void updateBowlerField(
-                                        bowler.id,
-                                        { scratchEntries },
-                                        "Scratch entries",
-                                      );
-                                    }
-                                    if (e.key === "Escape") {
-                                      e.preventDefault();
-                                      cancelCellEdit(
-                                        bowler.id,
-                                        "scratch_entries",
-                                        bowler,
-                                      );
-                                    }
-                                  }}
-                                />
-                                <button
-                                  type="button"
-                                  className="mini-btn"
-                                  disabled={sessionCompleted}
-                                  onClick={() => {
-                                    const scratchEntries = Number(
-                                      scratchEntriesDrafts[bowler.id],
-                                    );
-                                    void updateBowlerField(
-                                      bowler.id,
-                                      { scratchEntries },
-                                      "Scratch entries",
-                                    );
-                                  }}
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  type="button"
-                                  className="mini-btn secondary"
-                                  onClick={() =>
-                                    cancelCellEdit(
-                                      bowler.id,
-                                      "scratch_entries",
-                                      bowler,
-                                    )
-                                  }
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                className="avg-display"
-                                disabled={sessionCompleted}
-                                onClick={() => {
-                                  setScratchEntriesDrafts((prev) => ({
-                                    ...prev,
-                                    [bowler.id]: String(bowler.scratch_entries),
-                                  }));
-                                  setEditingCell({
-                                    bowlerId: bowler.id,
-                                    field: "scratch_entries",
-                                  });
-                                }}
-                              >
-                                {bowler.scratch_entries}
-                              </button>
-                            )}
-                          </td>
-                          <td>
-                            {editingCell?.bowlerId === bowler.id &&
-                            editingCell?.field === "handicap_entries" ? (
-                              <div className="avg-edit-wrap">
-                                <input
-                                  className="avg-input"
-                                  type="number"
-                                  min="0"
-                                  autoFocus
-                                  value={handicapEntriesDrafts[bowler.id] ?? ""}
-                                  onChange={(e) => {
-                                    const next = e.target.value;
-                                    setHandicapEntriesDrafts((prev) => ({
-                                      ...prev,
-                                      [bowler.id]: next,
-                                    }));
-                                  }}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                      e.preventDefault();
-                                      const handicapEntries = Number(
-                                        handicapEntriesDrafts[bowler.id],
-                                      );
-                                      void updateBowlerField(
-                                        bowler.id,
-                                        { handicapEntries },
-                                        "Handicap entries",
-                                      );
-                                    }
-                                    if (e.key === "Escape") {
-                                      e.preventDefault();
-                                      cancelCellEdit(
-                                        bowler.id,
-                                        "handicap_entries",
-                                        bowler,
-                                      );
-                                    }
-                                  }}
-                                />
-                                <button
-                                  type="button"
-                                  className="mini-btn"
-                                  disabled={sessionCompleted}
-                                  onClick={() => {
-                                    const handicapEntries = Number(
-                                      handicapEntriesDrafts[bowler.id],
-                                    );
-                                    void updateBowlerField(
-                                      bowler.id,
-                                      { handicapEntries },
-                                      "Handicap entries",
-                                    );
-                                  }}
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  type="button"
-                                  className="mini-btn secondary"
-                                  onClick={() =>
-                                    cancelCellEdit(
-                                      bowler.id,
-                                      "handicap_entries",
-                                      bowler,
-                                    )
-                                  }
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                className="avg-display"
-                                disabled={sessionCompleted}
-                                onClick={() => {
-                                  setHandicapEntriesDrafts((prev) => ({
-                                    ...prev,
-                                    [bowler.id]: String(
-                                      bowler.handicap_entries,
-                                    ),
-                                  }));
-                                  setEditingCell({
-                                    bowlerId: bowler.id,
-                                    field: "handicap_entries",
-                                  });
-                                }}
-                              >
-                                {bowler.handicap_entries}
-                              </button>
-                            )}
-                          </td>
-                          <td>
-                            <button
-                              type="button"
-                              className={`mini-btn ${bowler.pay_later ? "" : "secondary"}`}
-                              disabled={sessionCompleted}
-                              onClick={() => void togglePayLater(bowler)}
-                            >
-                              {bowler.pay_later ? "Yes" : "No"}
-                            </button>
-                          </td>
-                          <td>
-                            <div className="inline-stepper">
-                              <select
-                                value={bowler.all_brackets_mode || "off"}
-                                disabled={sessionCompleted}
-                                onChange={(e) => {
-                                  const mode = e.target.value;
-                                  void updateBowlerField(
-                                    bowler.id,
-                                    {
-                                      allBracketsMode: mode,
-                                      allBracketsCount: mode === "off" ? 0 : 1,
-                                    },
-                                    "All brackets mode",
-                                  );
-                                }}
-                              >
-                                <option value="off">Off</option>
-                                <option value="both">All (Both)</option>
-                                <option value="handicap">All-Handicap</option>
-                                <option value="scratch">All-Scratch</option>
-                              </select>
-                            </div>
-                          </td>
-                          <td>{toMoney(owedByBowler.get(bowler.id) ?? 0)}</td>
-                          <td className="actions">
-                            <button
-                              type="button"
-                              className="icon-button danger"
-                              disabled={sessionCompleted}
-                              onClick={() => onClickDelete(bowler.id)}
-                            >
-                              Delete
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </section>
-          </section>
-
-          <section
-            className={`page ${activePage === "brackets" ? "is-active" : ""}`}
-          >
-            <header className="page-head">
-              <div>
-                <p className="eyebrow">Brackets</p>
-                <h1>Generate brackets</h1>
-                <p className="subhead">
-                  Create the bracket structure once the roster is locked.
-                </p>
-              </div>
-            </header>
-
-            <section className="card">
-              <div className="row">
-                <button
-                  type="button"
-                  onClick={onGenerateBrackets}
-                  disabled={sessionCompleted || bracketRegenerationLocked}
-                >
-                  Generate Brackets
-                </button>
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={onPrintAliveList}
-                  disabled={(snapshot?.brackets?.length ?? 0) === 0}
-                >
-                  Print Alive List
-                </button>
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => void onPrintBrackets()}
-                  disabled={(snapshot?.brackets?.length ?? 0) === 0}
-                >
-                  Print Brackets
-                </button>
-              </div>
-
-              <div className="panel">
-                {(snapshot?.brackets?.length ?? 0) === 0 ? (
-                  <div>No brackets generated</div>
-                ) : (
-                  snapshot.brackets.map((br) => (
-                    <div
-                      className="bracket-card"
-                      key={`${br.kind}-${br.bracketNumber}`}
-                    >
-                      <div className="bracket-card-head">
-                        <strong>{`${br.kind.toUpperCase()} Bracket #${br.bracketNumber}`}</strong>
-                        <span
-                          className={`bracket-status ${
-                            br.rounds.every((round) =>
-                              round.matches.every(
-                                (match) => match.status === "complete",
-                              ),
-                            )
-                              ? "is-complete"
-                              : "is-live"
-                          }`}
-                        >
-                          {br.rounds.every((round) =>
-                            round.matches.every(
-                              (match) => match.status === "complete",
-                            ),
-                          )
-                            ? "Complete"
-                            : "In Progress"}
-                        </span>
-                      </div>
-                      <VisualBracket bracket={br} />
-                    </div>
-                  ))
-                )}
-              </div>
-            </section>
-          </section>
-
-          <section
-            className={`page ${activePage === "scores" ? "is-active" : ""}`}
-          >
-            <header className="page-head">
-              <div>
-                <p className="eyebrow">Scoring</p>
-                <h1>Update scores</h1>
-                <p className="subhead">
-                  Enter scores by game to advance brackets automatically.
-                </p>
-              </div>
-            </header>
-
-            <section className="card">
-              <div className="row">
-                <div
-                  className="game-tabs"
-                  role="tablist"
-                  aria-label="Game tabs"
-                >
-                  <button
-                    type="button"
-                    className={`tab-btn ${gameNumber === 1 ? "is-active" : ""}`}
-                    onClick={() => setGameNumber(1)}
-                  >
-                    Game 1
-                  </button>
-                  <button
-                    type="button"
-                    className={`tab-btn ${gameNumber === 2 ? "is-active" : ""}`}
-                    onClick={() => setGameNumber(2)}
-                    disabled={!game1Complete}
-                  >
-                    Game 2
-                  </button>
-                  <button
-                    type="button"
-                    className={`tab-btn ${gameNumber === 3 ? "is-active" : ""}`}
-                    onClick={() => setGameNumber(3)}
-                    disabled={!game2Complete}
-                  >
-                    Game 3
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={onSaveScores}
-                  disabled={sessionCompleted}
-                >
-                  Save Scores
-                </button>
-              </div>
-
-              <div className="panel score-panel">
-                {requiredScorers.length === 0 ? (
-                  <div>No active bowlers need scores for this game yet</div>
-                ) : (
-                  requiredScorers.map((s) => (
-                    <label key={s.bowlerId} className="score-row">
-                      {s.name}
-                      <input
-                        type="number"
-                        min="0"
-                        value={scoreDrafts[s.bowlerId] ?? ""}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setScoreDrafts((prev) => ({
-                            ...prev,
-                            [s.bowlerId]: value,
-                          }));
-                        }}
-                      />
-                    </label>
-                  ))
-                )}
-              </div>
-            </section>
-          </section>
-
-          <section
-            className={`page ${activePage === "payouts" ? "is-active" : ""}`}
-          >
-            <header className="page-head">
-              <div>
-                <p className="eyebrow">Payouts</p>
-                <h1>Payout summary</h1>
-                <p className="subhead">Track payouts as brackets complete.</p>
-              </div>
-            </header>
-
-            <section className="card">
-              <div className="row">
-                {refundTotals.length > 0 && (
-                  <button
-                    type="button"
-                    className="button secondary"
-                    onClick={() => setRefundModalOpen(true)}
-                  >
-                    View Refunds
-                  </button>
-                )}
-                {owedTotals.length > 0 && (
-                  <button
-                    type="button"
-                    className="button secondary"
-                    onClick={() => setOwedModalOpen(true)}
-                  >
-                    View Owed
-                  </button>
-                )}
-              </div>
-              <div className="panel">
-                {payouts.length === 0
-                  ? "No completed brackets yet"
-                  : payouts.map((p) => {
-                      const isPaid = paidPayoutMap.has(p.bowlerId);
-                      return (
-                        <div
-                          className={`refund-row ${isPaid ? "is-paid" : ""}`}
-                          key={p.bowlerId}
-                        >
-                          <div className="refund-meta">
-                            <strong>{p.name}</strong>
-                            <span>{toMoney(p.amountCents)}</span>
-                          </div>
-                          <button
-                            type="button"
-                            className={`mini-btn ${isPaid ? "secondary" : ""}`}
-                            onClick={() => void togglePayoutPaid(p.bowlerId)}
-                            disabled={sessionCompleted}
-                          >
-                            {isPaid ? "Undo" : "Mark Paid"}
-                          </button>
-                        </div>
-                      );
-                    })}
-              </div>
-            </section>
-          </section>
-
-          <section
-            className={`page ${activePage === "maintenance" ? "is-active" : ""}`}
-          >
-            <header className="page-head">
-              <div>
-                <p className="eyebrow">Maintenance</p>
-                <h1>Session management</h1>
-                <p className="subhead">
-                  Delete old or mistaken sessions. More maintenance options can
-                  live here later.
-                </p>
-              </div>
-            </header>
-
-            <section className="card">
-              <div className="panel">
-                {sessions.length === 0 ? (
-                  <div>No sessions available</div>
-                ) : (
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Session</th>
-                        <th>Status</th>
-                        <th>Created</th>
-                        <th>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sessions.map((session) => (
-                        <tr key={session.id}>
-                          <td>{session.name}</td>
-                          <td>{session.is_completed ? "Completed" : "Open"}</td>
-                          <td>{session.created_at ?? "-"}</td>
-                          <td>
-                            <button
-                              type="button"
-                              className="icon-button danger"
-                              onClick={() => onAskDeleteSession(session)}
-                            >
-                              Delete Session
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </section>
-          </section>
+          <MaintenancePage
+            active={activePage === "maintenance"}
+            sessions={sessions}
+            onAskDeleteSession={onAskDeleteSession}
+          />
         </main>
       </div>
 
-      <div
-        className={`modal ${confirmState.open ? "" : "is-hidden"}`}
-        aria-hidden={confirmState.open ? "false" : "true"}
-        onClick={(e) => {
-          if (e.currentTarget === e.target) {
-            setConfirmState({ open: false, bowlerId: null, message: "" });
-          }
+      <ConfirmDeleteModal
+        open={confirmState.open}
+        message={confirmState.message}
+        onCancel={() => {
+          setConfirmState({ open: false, bowlerId: null, message: "" });
+          setStatus("Delete cancelled");
         }}
-      >
-        <div
-          className="modal-card"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="confirm-title"
-        >
-          <h2 id="confirm-title">Confirm Delete</h2>
-          <p>{confirmState.message}</p>
-          <div className="modal-actions">
-            <button
-              type="button"
-              className="button secondary"
-              onClick={() => {
-                setConfirmState({ open: false, bowlerId: null, message: "" });
-                setStatus("Delete cancelled");
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="icon-button danger"
-              onClick={() => void confirmDelete()}
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-      </div>
+        onConfirm={() => void confirmDelete()}
+      />
 
-      <div
-        className={`modal ${refundModalOpen ? "" : "is-hidden"}`}
-        aria-hidden={refundModalOpen ? "false" : "true"}
-        onClick={(e) => {
-          if (e.currentTarget === e.target) {
-            setRefundModalOpen(false);
-          }
-        }}
-      >
-        <div
-          className="modal-card refund-modal-card"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="refund-title"
-        >
-          <h2 id="refund-title">Refund Queue</h2>
-          <p>Mark each bowler once their refund has been paid.</p>
-          <div className="refund-list">
-            {refundTotals.length === 0 ? (
-              <div className="refund-empty">
-                No refunds for this bracket run.
-              </div>
-            ) : (
-              refundTotals.map((row) => {
-                const isPaid = paidRefundMap.has(row.bowlerId);
-                return (
-                  <div
-                    className={`refund-row ${isPaid ? "is-paid" : ""}`}
-                    key={row.bowlerId}
-                  >
-                    <div className="refund-meta">
-                      <strong>{row.name}</strong>
-                      <span>{toMoney(row.amountCents)}</span>
-                    </div>
-                    <button
-                      type="button"
-                      className={`mini-btn ${isPaid ? "secondary" : ""}`}
-                      onClick={() => void toggleRefundPaid(row.bowlerId)}
-                      disabled={sessionCompleted}
-                    >
-                      {isPaid ? "Undo" : "Mark Paid"}
-                    </button>
-                  </div>
-                );
-              })
-            )}
-          </div>
-          <div className="modal-actions">
-            <button
-              type="button"
-              className="button secondary"
-              onClick={() => setRefundModalOpen(false)}
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      </div>
+      <RefundModal
+        open={refundModalOpen}
+        refundTotals={refundTotals}
+        paidRefundMap={paidRefundMap}
+        sessionCompleted={sessionCompleted}
+        onToggleRefundPaid={(bowlerId) => void toggleRefundPaid(bowlerId)}
+        onClose={() => setRefundModalOpen(false)}
+      />
 
-      <div
-        className={`modal ${owedModalOpen ? "" : "is-hidden"}`}
-        aria-hidden={owedModalOpen ? "false" : "true"}
-        onClick={(e) => {
-          if (e.currentTarget === e.target) {
-            setOwedModalOpen(false);
-          }
-        }}
-      >
-        <div
-          className="modal-card refund-modal-card"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="owed-title"
-        >
-          <h2 id="owed-title">Amounts Owed</h2>
-          <p>
-            Net owed is bracket cost minus payouts won. Mark paid when payment
-            is received.
-          </p>
-          <div className="refund-list">
-            {owedTotals.length === 0 ? (
-              <div className="refund-empty">
-                No pay-later bowlers in this session.
-              </div>
-            ) : (
-              owedTotals.map((row) => {
-                const isPaid = paidOwedMap.has(row.bowlerId);
-                return (
-                  <div
-                    className={`refund-row ${isPaid || row.netOwedCents === 0 ? "is-paid" : ""}`}
-                    key={row.bowlerId}
-                  >
-                    <div className="refund-meta">
-                      <strong>{row.name}</strong>
-                      <span>
-                        {`Net: ${toMoney(row.netOwedCents)} | Owed: ${toMoney(row.grossOwedCents)} | Won: ${toMoney(
-                          row.payoutCreditCents,
-                        )}`}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      className={`mini-btn ${isPaid ? "secondary" : ""}`}
-                      onClick={() => void toggleOwedPaid(row.bowlerId)}
-                      disabled={sessionCompleted || row.netOwedCents === 0}
-                    >
-                      {isPaid ? "Undo" : "Mark Received"}
-                    </button>
-                  </div>
-                );
-              })
-            )}
-          </div>
-          <div className="modal-actions">
-            <button
-              type="button"
-              className="button secondary"
-              onClick={() => setOwedModalOpen(false)}
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      </div>
+      <OwedModal
+        open={owedModalOpen}
+        owedTotals={owedTotals}
+        paidOwedMap={paidOwedMap}
+        sessionCompleted={sessionCompleted}
+        onToggleOwedPaid={(bowlerId) => void toggleOwedPaid(bowlerId)}
+        onClose={() => setOwedModalOpen(false)}
+      />
 
-      <div
-        className={`modal ${sessionDeleteModal.open ? "" : "is-hidden"}`}
-        aria-hidden={sessionDeleteModal.open ? "false" : "true"}
-        onClick={(e) => {
-          if (e.currentTarget === e.target) {
-            setSessionDeleteModal({
-              open: false,
-              sessionId: null,
-              sessionName: "",
-            });
-          }
-        }}
-      >
-        <div
-          className="modal-card"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="delete-session-title"
-        >
-          <h2 id="delete-session-title">Delete Session</h2>
-          <p>
-            Delete session <strong>{sessionDeleteModal.sessionName}</strong>?
-            This removes bowlers, scores, brackets, refunds, and payouts for
-            this session.
-          </p>
-          <div className="modal-actions">
-            <button
-              type="button"
-              className="button secondary"
-              onClick={() =>
-                setSessionDeleteModal({
-                  open: false,
-                  sessionId: null,
-                  sessionName: "",
-                })
-              }
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="icon-button danger"
-              onClick={() => void onConfirmDeleteSession()}
-            >
-              Delete Session
-            </button>
-          </div>
-        </div>
-      </div>
+      <SessionDeleteModal
+        open={sessionDeleteModal.open}
+        sessionName={sessionDeleteModal.sessionName}
+        onCancel={() =>
+          setSessionDeleteModal({
+            open: false,
+            sessionId: null,
+            sessionName: "",
+          })
+        }
+        onConfirm={() => void onConfirmDeleteSession()}
+      />
 
-      <div
-        className={`modal ${addBowlerModalOpen ? "" : "is-hidden"}`}
-        aria-hidden={addBowlerModalOpen ? "false" : "true"}
-        onClick={(e) => {
-          if (e.currentTarget === e.target) {
-            setAddBowlerModalOpen(false);
-          }
-        }}
-      >
-        <div
-          className="modal-card add-bowler-modal-card"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="add-bowler-title"
-        >
-          <h2 id="add-bowler-title">Add Bowler</h2>
-          <p>
-            Enter bowler details. Bracket entries can be set now or edited
-            later.
-          </p>
-          <form className="grid compact-grid" onSubmit={onAddBowler}>
-            <label>
-              Name
-              <input
-                required
-                name="name"
-                value={bowlerFormDefaults.name}
-                onChange={(e) =>
-                  setBowlerFormDefaults((p) => ({ ...p, name: e.target.value }))
-                }
-              />
-            </label>
-            <label>
-              Average
-              <input
-                required
-                name="average"
-                type="number"
-                min="0"
-                value={bowlerFormDefaults.average}
-                onChange={(e) =>
-                  setBowlerFormDefaults((p) => ({
-                    ...p,
-                    average: e.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label>
-              Scratch Entries
-              <input
-                required
-                name="scratchEntries"
-                type="number"
-                min="0"
-                value={bowlerFormDefaults.scratchEntries}
-                onChange={(e) =>
-                  setBowlerFormDefaults((p) => ({
-                    ...p,
-                    scratchEntries: e.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label>
-              Handicap Entries
-              <input
-                required
-                name="handicapEntries"
-                type="number"
-                min="0"
-                value={bowlerFormDefaults.handicapEntries}
-                onChange={(e) =>
-                  setBowlerFormDefaults((p) => ({
-                    ...p,
-                    handicapEntries: e.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="check-label">
-              <input
-                type="checkbox"
-                checked={Boolean(bowlerFormDefaults.payLater)}
-                onChange={(e) =>
-                  setBowlerFormDefaults((p) => ({
-                    ...p,
-                    payLater: e.target.checked,
-                  }))
-                }
-              />
-              <span>Pay later (track owed amount)</span>
-            </label>
-            <label className="check-label">
-              <span>All Brackets Mode</span>
-              <div className="mode-buttons">
-                {[
-                  { key: "off", label: "Off" },
-                  { key: "both", label: "All (Both)" },
-                  { key: "handicap", label: "All-Handicap" },
-                  { key: "scratch", label: "All-Scratch" },
-                ].map((mode) => (
-                  <button
-                    key={mode.key}
-                    type="button"
-                    className={`mode-btn ${bowlerFormDefaults.allBracketsMode === mode.key ? "is-selected" : ""}`}
-                    onClick={() =>
-                      setBowlerFormDefaults((p) => ({
-                        ...p,
-                        allBracketsMode: mode.key,
-                      }))
-                    }
-                  >
-                    {mode.label}
-                  </button>
-                ))}
-              </div>
-            </label>
-            <div className="modal-actions">
-              <button
-                type="button"
-                className="button secondary"
-                onClick={() => setAddBowlerModalOpen(false)}
-              >
-                Cancel
-              </button>
-              <button type="submit" disabled={sessionCompleted}>
-                Add Bowler
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
+      <AddBowlerModal
+        open={addBowlerModalOpen}
+        sessionCompleted={sessionCompleted}
+        formState={bowlerFormDefaults}
+        setFormState={setBowlerFormDefaults}
+        onClose={() => setAddBowlerModalOpen(false)}
+        onSubmit={onAddBowler}
+      />
     </>
   );
 }
