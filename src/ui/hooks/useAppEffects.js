@@ -21,7 +21,7 @@ export function useAppEffects({
   setGameNumber,
 }) {
   useEffect(() => {
-    if (!hasLoadedSession && activePage !== "session") {
+    if (!hasLoadedSession && activePage !== "session" && activePage !== "settings") {
       setActivePage("session");
     }
   }, [hasLoadedSession, activePage, setActivePage]);

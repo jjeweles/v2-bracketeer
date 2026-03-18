@@ -8,11 +8,12 @@ import { usePaymentActions } from "./hooks/usePaymentActions";
 import { useScoreActions } from "./hooks/useScoreActions";
 import { useSessionDataActions } from "./hooks/useSessionDataActions";
 import { useSessionLifecycleActions } from "./hooks/useSessionLifecycleActions";
+import { useThemePreference } from "./hooks/useThemePreference";
 import { BracketsPage } from "./pages/BracketsPage";
 import { BowlersPage } from "./pages/BowlersPage";
-import { MaintenancePage } from "./pages/MaintenancePage";
 import { PayoutsPage } from "./pages/PayoutsPage";
 import { ScoresPage } from "./pages/ScoresPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { SessionPage } from "./pages/SessionPage";
 import { ConfirmDeleteModal } from "./components/modals/ConfirmDeleteModal";
 import { OwedModal } from "./components/modals/OwedModal";
@@ -71,6 +72,7 @@ export function App() {
     sessionId: null,
     sessionName: "",
   });
+  const { theme, setTheme } = useThemePreference();
 
   const hasLoadedSession = Boolean(snapshot?.session);
   const sessionCompleted = Boolean(snapshot?.session?.is_completed);
@@ -315,8 +317,10 @@ export function App() {
             onTogglePayoutPaid={(bowlerId) => void togglePayoutPaid(bowlerId)}
           />
 
-          <MaintenancePage
-            active={activePage === "maintenance"}
+          <SettingsPage
+            active={activePage === "settings"}
+            theme={theme}
+            onThemeChange={setTheme}
             sessions={sessions}
             onAskDeleteSession={onAskDeleteSession}
           />

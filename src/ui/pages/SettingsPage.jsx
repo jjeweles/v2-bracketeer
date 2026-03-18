@@ -1,17 +1,42 @@
-export function MaintenancePage({ active, sessions, onAskDeleteSession }) {
+export function SettingsPage({
+  active,
+  theme,
+  onThemeChange,
+  sessions,
+  onAskDeleteSession,
+}) {
   return (
     <section className={`page ${active ? "is-active" : ""}`}>
       <header className="page-head">
         <div>
-          <p className="eyebrow">Maintenance</p>
-          <h1>Session management</h1>
+          <p className="eyebrow">Settings</p>
+          <h1>App preferences</h1>
           <p className="subhead">
-            Delete old or mistaken sessions. More maintenance options can live here later.
+            Choose how the app looks and manage old or mistaken sessions.
           </p>
         </div>
       </header>
 
       <section className="card">
+        <h2>Appearance</h2>
+        <div className="panel">
+          <label className="theme-picker-label">
+            Theme
+            <select
+              value={theme}
+              onChange={(e) => onThemeChange(e.target.value)}
+              className="theme-picker"
+            >
+              <option value="green">Green</option>
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section className="card">
+        <h2>Session management</h2>
         <div className="panel">
           {sessions.length === 0 ? (
             <div>No sessions available</div>

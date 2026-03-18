@@ -4,7 +4,6 @@ const PAGE_LABELS = {
   brackets: "Brackets",
   scores: "Score Updates",
   payouts: "Payout Summary",
-  maintenance: "Maintenance",
 };
 
 const PAGE_REQUIRES_SESSION = {
@@ -13,7 +12,6 @@ const PAGE_REQUIRES_SESSION = {
   brackets: true,
   scores: true,
   payouts: true,
-  maintenance: false,
 };
 
 export function SidebarNav({ snapshot, hasLoadedSession, activePage, setActivePage, status }) {
@@ -52,6 +50,15 @@ export function SidebarNav({ snapshot, hasLoadedSession, activePage, setActivePa
           );
         })}
       </nav>
+
+      <button
+        type="button"
+        className={`settings-shortcut ${activePage === "settings" ? "is-active" : ""}`}
+        onClick={() => setActivePage("settings")}
+      >
+        <span className="settings-shortcut-icon">⚙</span>
+        <span>Settings</span>
+      </button>
 
       <div className="sidebar-footer">
         <div className="status-label">Status</div>
