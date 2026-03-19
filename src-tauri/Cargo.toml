@@ -1,6 +1,6 @@
 [package]
 name = "v2-bracketeer"
-version = "1.0.1"
+version = "1.0.2"
 description = "V2 Bracketeer desktop app"
 authors = ["justinjewell"]
 license = ""

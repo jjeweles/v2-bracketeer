@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "V2 Bracketeer",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "identifier": "com.justinjewell.v2bracketeer",
   "build": {
     "beforeDevCommand": "bun run dev:desktop",
