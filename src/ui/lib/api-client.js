@@ -1,17 +1,36 @@
 let baseUrlCache = "";
+const TAURI_PORT_START = 31337;
+const TAURI_PORT_END = 31347;
+
+function getTauriCandidates() {
+  const candidates = [];
+  if (baseUrlCache) {
+    candidates.push(baseUrlCache);
+  }
+  for (let port = TAURI_PORT_START; port <= TAURI_PORT_END; port += 1) {
+    const url = `http://127.0.0.1:${port}`;
+    if (!candidates.includes(url)) {
+      candidates.push(url);
+    }
+  }
+  return candidates;
+}
 
 export async function api(path, init) {
   const inBrowser = typeof window !== "undefined" && Boolean(window.location);
   const protocol = inBrowser ? window.location.protocol : "";
   const host = inBrowser ? window.location.hostname : "";
-  const isTauri = protocol === "tauri:";
-  const shouldTryLocalBackend = isTauri || host === "localhost" || host === "127.0.0.1" || host === "";
+  const isTauriLike = Boolean(
+    (inBrowser && (protocol === "tauri:" || host === "tauri.localhost" || host.endsWith(".localhost"))) ||
+      (inBrowser && ("__TAURI_INTERNALS__" in window || "__TAURI__" in window)),
+  );
+  const shouldTryLocalBackend = isTauriLike || host === "localhost" || host === "127.0.0.1" || host === "";
   if (!baseUrlCache) {
-    baseUrlCache = isTauri ? "http://127.0.0.1:31337" : shouldTryLocalBackend ? "http://127.0.0.1:3000" : "";
+    baseUrlCache = isTauriLike ? `http://127.0.0.1:${TAURI_PORT_START}` : shouldTryLocalBackend ? "http://127.0.0.1:3000" : "";
   }
 
-  const baseCandidates = isTauri
-    ? ["http://127.0.0.1:31337"]
+  const baseCandidates = isTauriLike
+    ? getTauriCandidates()
     : shouldTryLocalBackend
       ? [baseUrlCache, "http://127.0.0.1:3000", ""]
       : [""];

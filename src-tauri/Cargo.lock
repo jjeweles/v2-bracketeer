@@ -3784,7 +3784,7 @@ dependencies = [
 
 [[package]]
 name = "v2-bracketeer"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "tauri",
  "tauri-build",

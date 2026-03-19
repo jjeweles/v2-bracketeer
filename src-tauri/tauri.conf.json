@@ -32,8 +32,9 @@
     ],
     "targets": "all",
     "icon": [
-      "icons/icon.png",
-      "icons/icon.ico"
+      "icons/gradient_dark.png",
+      "icons/gradient_dark.ico",
+      "icons/gradient_dark.icns"
     ]
   }
 }
