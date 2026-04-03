@@ -1,4 +1,8 @@
-export function DashboardTopbar({ snapshot, sessionCompleted, status }) {
+export function DashboardTopbar({
+  snapshot,
+  sessionCompleted,
+  status,
+}) {
   return (
     <header className="topbar">
       <div className="topbar-title">

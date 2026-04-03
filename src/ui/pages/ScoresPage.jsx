@@ -10,6 +10,21 @@ export function ScoresPage({
   scoreDrafts,
   onScoreChange,
 }) {
+  const laneGroups = [];
+  const laneGroupIndexByKey = new Map();
+
+  for (const scorer of requiredScorers) {
+    const laneNumber = scorer.laneNumber ?? null;
+    const key = laneNumber == null ? "unassigned" : `lane-${laneNumber}`;
+    let groupIndex = laneGroupIndexByKey.get(key);
+    if (groupIndex == null) {
+      groupIndex = laneGroups.length;
+      laneGroupIndexByKey.set(key, groupIndex);
+      laneGroups.push({ key, laneNumber, scorers: [] });
+    }
+    laneGroups[groupIndex].scorers.push(scorer);
+  }
+
   return (
     <section className={`page ${active ? "is-active" : ""}`}>
       <header className="page-head">
@@ -56,17 +71,28 @@ export function ScoresPage({
           {requiredScorers.length === 0 ? (
             <div>No active bowlers need scores for this game yet</div>
           ) : (
-            requiredScorers.map((s) => (
-              <label key={s.bowlerId} className="score-row">
-                {s.name}
-                <input
-                  type="number"
-                  min="0"
-                  value={scoreDrafts[s.bowlerId] ?? ""}
-                  onChange={(e) => onScoreChange(s.bowlerId, e.target.value)}
-                />
-              </label>
-            ))
+            <div className="score-lane-groups">
+              {laneGroups.map((group) => (
+                <div key={group.key} className="score-lane-group">
+                  <div className="score-lane-title">
+                    {group.laneNumber == null ? "No Lane Assigned" : `Lane ${group.laneNumber}`}
+                  </div>
+                  <div className="score-lane-list">
+                    {group.scorers.map((s) => (
+                      <label key={s.bowlerId} className="score-row">
+                        <span className="score-row-main">{s.name}</span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={scoreDrafts[s.bowlerId] ?? ""}
+                          onChange={(e) => onScoreChange(s.bowlerId, e.target.value)}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </section>

@@ -6,6 +6,7 @@ export function useAppEffects({
   setActivePage,
   snapshot,
   setNameDrafts,
+  setLaneNumberDrafts,
   setAverageDrafts,
   setScratchEntriesDrafts,
   setHandicapEntriesDrafts,
@@ -28,16 +29,19 @@ export function useAppEffects({
 
   useEffect(() => {
     const nextName = {};
+    const nextLane = {};
     const next = {};
     const nextScratch = {};
     const nextHandicap = {};
     for (const b of snapshot?.bowlers ?? []) {
       nextName[b.id] = b.name;
+      nextLane[b.id] = b.lane_number == null ? "" : String(b.lane_number);
       next[b.id] = String(b.average);
       nextScratch[b.id] = String(b.scratch_entries);
       nextHandicap[b.id] = String(b.handicap_entries);
     }
     setNameDrafts(nextName);
+    setLaneNumberDrafts(nextLane);
     setAverageDrafts(next);
     setScratchEntriesDrafts(nextScratch);
     setHandicapEntriesDrafts(nextHandicap);
@@ -45,6 +49,7 @@ export function useAppEffects({
   }, [
     snapshot,
     setNameDrafts,
+    setLaneNumberDrafts,
     setAverageDrafts,
     setScratchEntriesDrafts,
     setHandicapEntriesDrafts,

@@ -286,6 +286,21 @@ body {
   background: rgba(6, 29, 24, 0.75);
 }
 
+.update-pill {
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.update-pill:hover {
+  border-color: rgba(91, 244, 183, 0.45);
+  background: rgba(77, 184, 142, 0.2);
+}
+
+.update-pill.secondary {
+  color: var(--pill-text);
+  border-color: var(--line);
+}
+
 .status-pill {
   border-color: rgba(91, 244, 183, 0.35);
   color: #b7ffe1;
@@ -465,6 +480,17 @@ h2 {
   padding-bottom: 0.3rem;
 }
 
+.bowlers-entrants-btn {
+  margin-left: auto;
+}
+
+.bowlers-entry-needs {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0 0 0.7rem;
+}
+
 label {
   display: flex;
   flex-direction: column;
@@ -604,16 +630,58 @@ button:focus {
   text-align: right;
 }
 
+.updates-panel .row {
+  margin-top: 0.6rem;
+}
+
 .score-panel {
   display: grid;
   gap: 0.5rem;
 }
 
-.score-row {
+.score-lane-groups {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.score-lane-group {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--soft-bg);
+  padding: 0.52rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.score-lane-title {
+  font-size: 0.79rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--table-head);
+}
+
+.score-lane-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.score-row {
+  border: 1px solid rgba(77, 184, 142, 0.26);
+  border-radius: 10px;
+  background: rgba(77, 184, 142, 0.08);
   padding: 0.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.score-row-main {
+  min-width: 0;
+}
+
+.score-row input {
+  width: 6.2rem;
 }
 
 table {
@@ -839,6 +907,20 @@ thead th {
   width: min(700px, 100%);
 }
 
+.entrants-modal-card {
+  width: min(860px, 100%);
+}
+
+.entrants-table-wrap {
+  margin-top: 0.75rem;
+  max-height: min(58vh, 640px);
+  overflow: auto;
+}
+
+.entrants-table {
+  width: 100%;
+}
+
 .compact-grid {
   margin-top: 0.7rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -921,6 +1003,14 @@ thead th {
 }
 
 .alive-print-fallback {
+  display: none;
+}
+
+.brackets-print-fallback {
+  display: none;
+}
+
+.entrants-print-fallback {
   display: none;
 }
 
@@ -1043,7 +1133,6 @@ thead th {
 
 @media print {
   @page {
-    size: landscape;
     margin: 10mm;
   }
 
@@ -1102,6 +1191,34 @@ thead th {
     width: 100% !important;
   }
 
+  .print-brackets-sheet.print-grid-6 {
+    display: block !important;
+    width: 100% !important;
+  }
+
+  .print-brackets-sheet.print-grid-6 .print-brackets-page {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    grid-template-rows: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6mm !important;
+    break-after: page !important;
+    page-break-after: always !important;
+  }
+
+  .print-brackets-sheet.print-grid-6 .print-brackets-page:last-child {
+    break-after: auto !important;
+    page-break-after: auto !important;
+  }
+
+  .print-brackets-sheet.print-grid-6 .print-brackets-page .bracket-card {
+    break-after: auto !important;
+    page-break-after: auto !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    margin: 0 !important;
+    padding: 2.5mm !important;
+  }
+
   .bracket-card {
     break-inside: avoid;
     page-break-inside: avoid;
@@ -1147,6 +1264,53 @@ thead th {
 
   body.is-printing-alive-list .shell {
     display: none !important;
+  }
+
+  body.is-printing-brackets .shell {
+    display: none !important;
+  }
+
+  body.is-printing-brackets .brackets-print-fallback {
+    display: block !important;
+    color: #111111 !important;
+  }
+
+  body.is-printing-entrants .shell {
+    display: none !important;
+  }
+
+  body.is-printing-entrants .entrants-print-fallback {
+    display: block !important;
+    color: #111111 !important;
+    font-family: Arial, sans-serif !important;
+  }
+
+  body.is-printing-entrants .entrants-print-sheet h1 {
+    margin: 0 0 6px;
+    font-size: 24px;
+  }
+
+  body.is-printing-entrants .entrants-print-sheet p {
+    margin: 0 0 12px;
+    font-size: 14px;
+    color: #444;
+  }
+
+  body.is-printing-entrants .entrants-print-sheet table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  body.is-printing-entrants .entrants-print-sheet th,
+  body.is-printing-entrants .entrants-print-sheet td {
+    border: 1px solid #999;
+    padding: 8px;
+    text-align: left;
+    font-size: 13px;
+  }
+
+  body.is-printing-entrants .entrants-print-sheet thead th {
+    background: #f1f1f1;
   }
 
   body.is-printing-alive-list .alive-print-fallback {

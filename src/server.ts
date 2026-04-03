@@ -20,7 +20,154 @@ import {
 } from "./lib/engine";
 import "./lib/db";
 
+const APP_VERSION = String(process.env.BRACKETEER_APP_VERSION || process.env.npm_package_version || "0.0.0");
+const UPDATE_CHECK_URL = String(
+  process.env.BRACKETEER_UPDATE_CHECK_URL || "https://api.github.com/repos/jjeweles/v2-bracketeer/releases/latest"
+);
+const RELEASES_PAGE_URL = String(
+  process.env.BRACKETEER_RELEASES_PAGE_URL || "https://github.com/jjeweles/v2-bracketeer/releases"
+);
+
 let pdfPolyfillsInstalled = false;
+
+function normalizeVersion(input: string): string {
+  return String(input || "").trim().replace(/^v/i, "");
+}
+
+function compareSemver(aRaw: string, bRaw: string): number {
+  const a = normalizeVersion(aRaw).split(".").map((part) => Number(part.replace(/[^\d].*$/, "")));
+  const b = normalizeVersion(bRaw).split(".").map((part) => Number(part.replace(/[^\d].*$/, "")));
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i += 1) {
+    const av = Number.isFinite(a[i]) ? a[i] : 0;
+    const bv = Number.isFinite(b[i]) ? b[i] : 0;
+    if (av > bv) return 1;
+    if (av < bv) return -1;
+  }
+  return 0;
+}
+
+function pickPreferredAsset(assets: Array<{ name: string; browser_download_url: string }>) {
+  const platform = process.platform;
+  const arch = process.arch;
+  const lower = assets.map((a) => ({ ...a, lname: a.name.toLowerCase() }));
+
+  if (platform === "darwin") {
+    if (arch === "arm64") {
+      return (
+        lower.find((a) => a.lname.endsWith(".dmg") && a.lname.includes("aarch64")) ||
+        lower.find((a) => a.lname.endsWith(".dmg") && a.lname.includes("arm64")) ||
+        lower.find((a) => a.lname.endsWith(".dmg"))
+      );
+    }
+    return (
+      lower.find((a) => a.lname.endsWith(".dmg") && a.lname.includes("x64")) ||
+      lower.find((a) => a.lname.endsWith(".dmg"))
+    );
+  }
+
+  if (platform === "win32") {
+    return (
+      lower.find((a) => a.lname.endsWith("-setup.exe")) ||
+      lower.find((a) => a.lname.endsWith(".exe")) ||
+      lower.find((a) => a.lname.endsWith(".msi"))
+    );
+  }
+
+  if (platform === "linux") {
+    return (
+      lower.find((a) => a.lname.endsWith(".appimage")) ||
+      lower.find((a) => a.lname.endsWith(".deb")) ||
+      lower.find((a) => a.lname.endsWith(".rpm"))
+    );
+  }
+
+  return undefined;
+}
+
+async function checkForUpdates() {
+  const currentVersion = normalizeVersion(APP_VERSION);
+  try {
+    const res = await fetch(UPDATE_CHECK_URL, {
+      headers: {
+        accept: "application/vnd.github+json",
+        "user-agent": "v2-bracketeer-update-check",
+      },
+    });
+
+    if (!res.ok) {
+      return {
+        currentVersion,
+        latestVersion: currentVersion,
+        isUpdateAvailable: false,
+        releaseUrl: RELEASES_PAGE_URL,
+        publishedAt: null,
+        error: `Update check unavailable (${res.status})`,
+      };
+    }
+
+    const data = (await res.json()) as {
+      tag_name?: string;
+      html_url?: string;
+      published_at?: string;
+      name?: string;
+      assets?: Array<{
+        name?: string;
+        browser_download_url?: string;
+        size?: number;
+      }>;
+    };
+    const latestVersion = normalizeVersion(data.tag_name || data.name || "");
+    const assets = (data.assets ?? [])
+      .map((asset) => ({
+        name: String(asset.name ?? ""),
+        downloadUrl: String(asset.browser_download_url ?? ""),
+        size: Number(asset.size ?? 0),
+      }))
+      .filter((asset) => asset.name && asset.downloadUrl);
+    const recommended = pickPreferredAsset(
+      assets.map((asset) => ({ name: asset.name, browser_download_url: asset.downloadUrl }))
+    );
+    if (!latestVersion) {
+      return {
+        currentVersion,
+        latestVersion: currentVersion,
+        isUpdateAvailable: false,
+        releaseUrl: RELEASES_PAGE_URL,
+        recommendedDownloadUrl: recommended?.browser_download_url ?? "",
+        recommendedAssetName: recommended?.name ?? "",
+        assets,
+        publishedAt: null,
+        error: "Update source returned no version",
+      };
+    }
+
+    const isUpdateAvailable = compareSemver(latestVersion, currentVersion) > 0;
+    return {
+      currentVersion,
+      latestVersion,
+      isUpdateAvailable,
+      releaseUrl: String(data.html_url || RELEASES_PAGE_URL),
+      recommendedDownloadUrl: recommended?.browser_download_url ?? "",
+      recommendedAssetName: recommended?.name ?? "",
+      assets,
+      publishedAt: data.published_at ?? null,
+      error: "",
+    };
+  } catch {
+    return {
+      currentVersion,
+      latestVersion: currentVersion,
+      isUpdateAvailable: false,
+      releaseUrl: RELEASES_PAGE_URL,
+      recommendedDownloadUrl: "",
+      recommendedAssetName: "",
+      assets: [],
+      publishedAt: null,
+      error: "Update check failed",
+    };
+  }
+}
 
 function installPdfPolyfills() {
   if (pdfPolyfillsInstalled) return;
@@ -185,6 +332,15 @@ Bun.serve({
         return json({ sessions: listSessions() });
       }
 
+      if (pathname === "/api/app/version" && req.method === "GET") {
+        return json({ version: normalizeVersion(APP_VERSION) });
+      }
+
+      if (pathname === "/api/app/update-check" && req.method === "GET") {
+        const update = await checkForUpdates();
+        return json(update);
+      }
+
       if (pathname === "/api/sessions" && req.method === "POST") {
         const contentType = req.headers.get("content-type") ?? "";
         let body: {
@@ -306,8 +462,18 @@ Bun.serve({
         if (allBracketsMode !== "off" && (!Number.isFinite(allBracketsCount) || allBracketsCount < 1)) {
           return badRequest("All brackets count must be at least 1 when enabled");
         }
+        const rawLaneNumber = body.laneNumber;
+        let laneNumber: number | null = null;
+        if (!(rawLaneNumber === undefined || rawLaneNumber === null || rawLaneNumber === "")) {
+          const parsedLane = Number(rawLaneNumber);
+          if (!Number.isFinite(parsedLane) || parsedLane < 1 || !Number.isInteger(parsedLane)) {
+            return badRequest("Lane number must be a whole number of at least 1");
+          }
+          laneNumber = parsedLane;
+        }
         const bowler = addBowler(sessionId, {
           name: String(body.name ?? ""),
+          laneNumber,
           average: Number(body.average ?? 0),
           scratchEntries: Number(body.scratchEntries ?? 0),
           handicapEntries: Number(body.handicapEntries ?? 0),
@@ -427,6 +593,7 @@ Bun.serve({
         const body = await req.json();
         const patch: {
           name?: string;
+          laneNumber?: number | null;
           average?: number;
           scratchEntries?: number;
           handicapEntries?: number;
@@ -446,6 +613,17 @@ Bun.serve({
             return badRequest("Average must be a non-negative number");
           }
           patch.average = average;
+        }
+        if (body.laneNumber !== undefined) {
+          if (body.laneNumber === null || body.laneNumber === "") {
+            patch.laneNumber = null;
+          } else {
+            const laneNumber = Number(body.laneNumber);
+            if (!Number.isFinite(laneNumber) || laneNumber < 1 || !Number.isInteger(laneNumber)) {
+              return badRequest("Lane number must be a whole number of at least 1");
+            }
+            patch.laneNumber = laneNumber;
+          }
         }
         if (body.scratchEntries != null) {
           const scratchEntries = Number(body.scratchEntries);

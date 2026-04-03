@@ -4,6 +4,9 @@ export function SettingsPage({
   onThemeChange,
   sessions,
   onAskDeleteSession,
+  updateInfo,
+  onCheckUpdates,
+  onOpenReleasePage,
 }) {
   return (
     <section className={`page ${active ? "is-active" : ""}`}>
@@ -32,6 +35,44 @@ export function SettingsPage({
               <option value="light">Light</option>
             </select>
           </label>
+        </div>
+      </section>
+
+      <section className="card">
+        <h2>Updates</h2>
+        <div className="panel updates-panel">
+          <div className="summary-row">
+            <span>Current version</span>
+            <strong>{updateInfo?.currentVersion ? `v${updateInfo.currentVersion}` : "-"}</strong>
+          </div>
+          <div className="summary-row">
+            <span>Latest version</span>
+            <strong>{updateInfo?.latestVersion ? `v${updateInfo.latestVersion}` : "-"}</strong>
+          </div>
+          <div className="summary-row">
+            <span>Status</span>
+            <strong>
+              {updateInfo?.checking
+                ? "Checking..."
+                : updateInfo?.error
+                ? "Check failed"
+                : updateInfo?.isUpdateAvailable
+                ? "Update available"
+                : "Up to date"}
+            </strong>
+          </div>
+          <div className="row">
+            <button type="button" className="secondary" onClick={onCheckUpdates} disabled={updateInfo?.checking}>
+              {updateInfo?.checking ? "Checking..." : "Check for Updates"}
+            </button>
+            <button
+              type="button"
+              onClick={onOpenReleasePage}
+              disabled={!updateInfo?.recommendedDownloadUrl && !updateInfo?.releaseUrl}
+            >
+              {updateInfo?.recommendedDownloadUrl ? "Download Update" : "Open Latest Release"}
+            </button>
+          </div>
         </div>
       </section>
 

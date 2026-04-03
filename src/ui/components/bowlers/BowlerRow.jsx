@@ -8,6 +8,8 @@ export function BowlerRow({
   setEditingCell,
   nameDrafts,
   setNameDrafts,
+  laneNumberDrafts,
+  setLaneNumberDrafts,
   averageDrafts,
   setAverageDrafts,
   scratchEntriesDrafts,
@@ -25,6 +27,8 @@ export function BowlerRow({
     editingCell?.bowlerId === bowler.id && editingCell?.field === "name";
   const isEditingAverage =
     editingCell?.bowlerId === bowler.id && editingCell?.field === "average";
+  const isEditingLane =
+    editingCell?.bowlerId === bowler.id && editingCell?.field === "lane_number";
   const isEditingScratch =
     editingCell?.bowlerId === bowler.id &&
     editingCell?.field === "scratch_entries";
@@ -44,6 +48,12 @@ export function BowlerRow({
   function saveScratchEntries() {
     const scratchEntries = Number(scratchEntriesDrafts[bowler.id]);
     void updateBowlerField(bowler.id, { scratchEntries }, "Scratch entries");
+  }
+
+  function saveLaneNumber() {
+    const raw = String(laneNumberDrafts[bowler.id] ?? "").trim();
+    const laneNumber = raw === "" ? null : raw;
+    void updateBowlerField(bowler.id, { laneNumber }, "Lane number");
   }
 
   function saveHandicapEntries() {
@@ -68,6 +78,30 @@ export function BowlerRow({
             startEdit("name");
           }}
           displayValue={bowler.displayName}
+        />
+      </td>
+
+      <td>
+        <EditableCellButton
+          isEditing={isEditingLane}
+          sessionCompleted={sessionCompleted}
+          draftValue={laneNumberDrafts[bowler.id] ?? ""}
+          onDraftChange={(next) =>
+            setLaneNumberDrafts((prev) => ({ ...prev, [bowler.id]: next }))
+          }
+          onSave={saveLaneNumber}
+          onCancel={() => cancelCellEdit(bowler.id, "lane_number", bowler)}
+          onStartEdit={() => {
+            setLaneNumberDrafts((prev) => ({
+              ...prev,
+              [bowler.id]:
+                bowler.lane_number == null ? "" : String(bowler.lane_number),
+            }));
+            startEdit("lane_number");
+          }}
+          displayValue={bowler.lane_number ?? "-"}
+          inputType="number"
+          inputMin="1"
         />
       </td>
 

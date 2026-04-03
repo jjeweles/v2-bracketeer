@@ -4,6 +4,8 @@ export function BowlersPage({
   active,
   sessionCompleted,
   onOpenAddBowler,
+  onOpenEntrants,
+  entriesNeededSummary,
   bowlerSearchQuery,
   setBowlerSearchQuery,
   onImportBowlersPdf,
@@ -13,6 +15,8 @@ export function BowlersPage({
   setEditingCell,
   nameDrafts,
   setNameDrafts,
+  laneNumberDrafts,
+  setLaneNumberDrafts,
   averageDrafts,
   setAverageDrafts,
   scratchEntriesDrafts,
@@ -54,6 +58,22 @@ export function BowlersPage({
             value={bowlerSearchQuery}
             onChange={(e) => setBowlerSearchQuery(e.target.value)}
           />
+          <button type="button" className="secondary bowlers-entrants-btn" onClick={onOpenEntrants}>
+            Entrants
+          </button>
+        </div>
+
+        <div className="bowlers-entry-needs">
+          <span className="pill">
+            {entriesNeededSummary?.scratch == null
+              ? "Scratch: need at least 8 bowlers"
+              : `Scratch Needed: ${entriesNeededSummary.scratch}`}
+          </span>
+          <span className="pill">
+            {entriesNeededSummary?.handicap == null
+              ? "Hdcp: need at least 8 bowlers"
+              : `Hdcp Needed: ${entriesNeededSummary.handicap}`}
+          </span>
         </div>
 
         <div className="file-label">
@@ -85,6 +105,7 @@ export function BowlersPage({
               <thead>
                 <tr>
                   <th>Name</th>
+                  <th>Lane #</th>
                   <th>Avg</th>
                   <th>Hdcp</th>
                   <th>Scratch Entries</th>
@@ -105,6 +126,8 @@ export function BowlersPage({
                     setEditingCell={setEditingCell}
                     nameDrafts={nameDrafts}
                     setNameDrafts={setNameDrafts}
+                    laneNumberDrafts={laneNumberDrafts}
+                    setLaneNumberDrafts={setLaneNumberDrafts}
                     averageDrafts={averageDrafts}
                     setAverageDrafts={setAverageDrafts}
                     scratchEntriesDrafts={scratchEntriesDrafts}

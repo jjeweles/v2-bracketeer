@@ -9,71 +9,118 @@ function shuffle<T>(items: T[]): T[] {
   return copy;
 }
 
-function weightedPick(ids: number[], counts: Map<number, number>): number {
-  const weighted: number[] = [];
-  for (const id of ids) {
-    const count = counts.get(id) ?? 0;
-    for (let i = 0; i < count; i += 1) {
-      weighted.push(id);
-    }
-  }
-  return weighted[Math.floor(Math.random() * weighted.length)];
-}
-
 export function buildEightManGroups(entryCounts: Map<number, number>) {
-  const working = new Map(entryCounts);
-  const brackets: number[][] = [];
-
-  while (true) {
-    const totalEntries = Array.from(working.values()).reduce((acc, n) => acc + n, 0);
-    const uniqueAvailable = Array.from(working.entries())
-      .filter(([, count]) => count > 0)
-      .map(([id]) => id);
-
-    if (totalEntries < 8 || uniqueAvailable.length < 8) {
-      break;
+  const normalized = new Map<number, number>();
+  for (const [id, rawCount] of entryCounts.entries()) {
+    const count = Math.max(0, Math.floor(Number(rawCount) || 0));
+    if (count > 0) {
+      normalized.set(id, count);
     }
-
-    let success: number[] | null = null;
-
-    for (let attempt = 0; attempt < 200; attempt += 1) {
-      const temp = new Map(working);
-      const selected = new Set<number>();
-      const result: number[] = [];
-
-      for (let seed = 1; seed <= 8; seed += 1) {
-        const eligible = Array.from(temp.entries())
-          .filter(([id, count]) => count > 0 && !selected.has(id))
-          .map(([id]) => id);
-
-        if (eligible.length === 0) {
-          result.length = 0;
-          break;
-        }
-
-        const picked = weightedPick(eligible, temp);
-        selected.add(picked);
-        result.push(picked);
-        temp.set(picked, (temp.get(picked) ?? 0) - 1);
-      }
-
-      if (result.length === 8) {
-        success = result;
-        for (const bowlerId of success) {
-          working.set(bowlerId, (working.get(bowlerId) ?? 0) - 1);
-        }
-        break;
-      }
-    }
-
-    if (!success) {
-      break;
-    }
-
-    brackets.push(shuffle(success));
   }
 
-  return { brackets, leftovers: working };
+  const ids = [...normalized.keys()];
+  const totalEntries = [...normalized.values()].reduce((acc, n) => acc + n, 0);
+  const uniqueAvailable = ids.length;
+
+  function feasible(bracketCount: number): boolean {
+    if (bracketCount <= 0) return true;
+    if (uniqueAvailable < 8) return false;
+    let capacity = 0;
+    for (const count of normalized.values()) {
+      capacity += Math.min(count, bracketCount);
+    }
+    return capacity >= bracketCount * 8;
+  }
+
+  const maxByEntries = Math.floor(totalEntries / 8);
+  let targetBracketCount = 0;
+  for (let candidate = 1; candidate <= maxByEntries; candidate += 1) {
+    if (feasible(candidate)) {
+      targetBracketCount = candidate;
+    } else {
+      break;
+    }
+  }
+
+  if (targetBracketCount === 0) {
+    return { brackets: [], leftovers: new Map(entryCounts) };
+  }
+
+  const quotas = new Map<number, number>();
+  let quotaSum = 0;
+  for (const id of ids) {
+    const q = Math.min(normalized.get(id) ?? 0, targetBracketCount);
+    quotas.set(id, q);
+    quotaSum += q;
+  }
+
+  let extras = quotaSum - targetBracketCount * 8;
+  if (extras > 0) {
+    const trimOrder = [...ids].sort((a, b) => {
+      const diff = (quotas.get(b) ?? 0) - (quotas.get(a) ?? 0);
+      if (diff !== 0) return diff;
+      return a - b;
+    });
+    for (const id of trimOrder) {
+      if (extras <= 0) break;
+      const current = quotas.get(id) ?? 0;
+      const take = Math.min(current, extras);
+      quotas.set(id, current - take);
+      extras -= take;
+    }
+  }
+
+  const brackets: number[][] = Array.from({ length: targetBracketCount }, () => []);
+  const loads = Array.from({ length: targetBracketCount }, () => 0);
+  const assignmentOrder = [...ids].sort((a, b) => {
+    const diff = (quotas.get(b) ?? 0) - (quotas.get(a) ?? 0);
+    if (diff !== 0) return diff;
+    return a - b;
+  });
+
+  for (const id of assignmentOrder) {
+    const quota = quotas.get(id) ?? 0;
+    if (quota <= 0) continue;
+    const usedRounds = new Set<number>();
+
+    for (let n = 0; n < quota; n += 1) {
+      let bestRound = -1;
+      let bestLoad = Number.POSITIVE_INFINITY;
+
+      for (let round = 0; round < targetBracketCount; round += 1) {
+        if (usedRounds.has(round)) continue;
+        if (loads[round] < bestLoad) {
+          bestLoad = loads[round];
+          bestRound = round;
+        }
+      }
+
+      if (bestRound < 0) {
+        continue;
+      }
+
+      brackets[bestRound].push(id);
+      loads[bestRound] += 1;
+      usedRounds.add(bestRound);
+    }
+  }
+
+  const completeBrackets = brackets
+    .filter((group) => group.length === 8)
+    .map((group) => shuffle(group));
+  const usage = new Map<number, number>();
+  for (const group of completeBrackets) {
+    for (const id of group) {
+      usage.set(id, (usage.get(id) ?? 0) + 1);
+    }
+  }
+
+  const leftovers = new Map(entryCounts);
+  for (const [id, used] of usage.entries()) {
+    leftovers.set(id, Math.max(0, (leftovers.get(id) ?? 0) - used));
+  }
+
+  return { brackets: completeBrackets, leftovers };
 }
 
 function getEffectiveScore(

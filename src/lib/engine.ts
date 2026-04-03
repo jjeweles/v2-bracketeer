@@ -7,6 +7,7 @@ type Bowler = {
   id: number;
   session_id: number;
   name: string;
+  lane_number: number | null;
   average: number;
   handicap_value: number;
   scratch_entries: number;
@@ -34,11 +35,11 @@ const getSessionStmt = db.query(
   `SELECT id, name, entry_fee_cents, handicap_percent, handicap_base, payout_first_cents, payout_second_cents, is_completed, brackets_printed_at, completed_at FROM sessions WHERE id = ?`
 );
 const getBowlersStmt = db.query(
-  `SELECT id, session_id, name, average, handicap_value, scratch_entries, handicap_entries, pay_later, all_brackets, all_brackets_count, all_brackets_mode
+  `SELECT id, session_id, name, lane_number, average, handicap_value, scratch_entries, handicap_entries, pay_later, all_brackets, all_brackets_count, all_brackets_mode
    FROM bowlers WHERE session_id = ? ORDER BY id`
 );
 const getBowlerStmt = db.query(
-  `SELECT id, session_id, name, average, handicap_value, scratch_entries, handicap_entries, pay_later, all_brackets, all_brackets_count, all_brackets_mode
+  `SELECT id, session_id, name, lane_number, average, handicap_value, scratch_entries, handicap_entries, pay_later, all_brackets, all_brackets_count, all_brackets_mode
    FROM bowlers WHERE id = ? AND session_id = ?`
 );
 
@@ -120,6 +121,7 @@ export function addBowler(
   sessionId: number,
   input: {
     name: string;
+    laneNumber?: number | null;
     average: number;
     scratchEntries: number;
     handicapEntries: number;
@@ -133,16 +135,21 @@ export function addBowler(
   const handicapValue = calculateHandicap(input.average, session.handicap_percent, session.handicap_base);
 
   const stmt = db.query(
-    `INSERT INTO bowlers (session_id, name, average, handicap_value, scratch_entries, handicap_entries, pay_later, all_brackets, all_brackets_count, all_brackets_mode)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`
+    `INSERT INTO bowlers (session_id, name, lane_number, average, handicap_value, scratch_entries, handicap_entries, pay_later, all_brackets, all_brackets_count, all_brackets_mode)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`
   );
   const allBracketsMode = normalizeAllBracketsMode(input.allBracketsMode);
   const allBracketsCount = allBracketsMode === "off" ? 0 : Math.max(1, Number(input.allBracketsCount ?? 1));
   const allBrackets = allBracketsMode === "off" ? 0 : 1;
+  const laneNumber =
+    input.laneNumber == null || !Number.isFinite(input.laneNumber) || input.laneNumber < 1
+      ? null
+      : Math.floor(input.laneNumber);
 
   return stmt.get(
     sessionId,
     input.name.trim(),
+    laneNumber,
     input.average,
     handicapValue,
     input.scratchEntries,
@@ -222,6 +229,7 @@ export function updateBowler(
   bowlerId: number,
   input: {
     name?: string;
+    laneNumber?: number | null;
     average?: number;
     scratchEntries?: number;
     handicapEntries?: number;
@@ -238,6 +246,12 @@ export function updateBowler(
   }
 
   const nextName = input.name == null ? bowler.name : input.name.trim();
+  const nextLaneNumber =
+    input.laneNumber === undefined
+      ? bowler.lane_number
+      : input.laneNumber === null || !Number.isFinite(input.laneNumber) || input.laneNumber < 1
+      ? null
+      : Math.floor(input.laneNumber);
   const nextAverage = input.average == null ? bowler.average : input.average;
   const nextScratchEntries = input.scratchEntries == null ? bowler.scratch_entries : input.scratchEntries;
   const nextHandicapEntries = input.handicapEntries == null ? bowler.handicap_entries : input.handicapEntries;
@@ -255,12 +269,13 @@ export function updateBowler(
   const updated = db
     .query(
       `UPDATE bowlers
-       SET name = ?, average = ?, handicap_value = ?, scratch_entries = ?, handicap_entries = ?, pay_later = ?, all_brackets = ?, all_brackets_count = ?, all_brackets_mode = ?
+       SET name = ?, lane_number = ?, average = ?, handicap_value = ?, scratch_entries = ?, handicap_entries = ?, pay_later = ?, all_brackets = ?, all_brackets_count = ?, all_brackets_mode = ?
        WHERE id = ? AND session_id = ?
        RETURNING *`
     )
     .get(
       nextName,
+      nextLaneNumber,
       nextAverage,
       handicapValue,
       nextScratchEntries,
@@ -579,10 +594,18 @@ export function getSessionSnapshot(sessionId: number) {
         const bowler = bowlerById.get(bowlerId);
         return {
           bowlerId,
+          laneNumber: bowler?.lane_number ?? null,
           name: displayNameById.get(bowlerId) ?? (bowler ? toDisplayName(bowler.name) : `#${bowlerId}`),
         };
       })
-      .sort((a, b) => compareDisplayNames(a.name, b.name));
+      .sort((a, b) => {
+        const aLane = a.laneNumber == null ? Number.POSITIVE_INFINITY : a.laneNumber;
+        const bLane = b.laneNumber == null ? Number.POSITIVE_INFINITY : b.laneNumber;
+        if (aLane !== bLane) {
+          return aLane - bLane;
+        }
+        return compareDisplayNames(a.name, b.name);
+      });
   }
 
   const refundTotalsMap = new Map<number, number>();

@@ -7,9 +7,13 @@ mkdirSync(dirname(DB_PATH), { recursive: true });
 
 export const db = new Database(DB_PATH);
 
-const RESET_TO_DEMO_ON_BOOT = false;
+const RESET_TO_DEMO_ON_BOOT = true;
 
-function calculateHandicap(average: number, percent: number, base: number): number {
+function calculateHandicap(
+  average: number,
+  percent: number,
+  base: number,
+): number {
   const raw = ((base - average) * percent) / 100;
   return Math.max(0, Math.round(raw));
 }
@@ -35,6 +39,7 @@ CREATE TABLE IF NOT EXISTS bowlers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
+  lane_number INTEGER,
   average INTEGER NOT NULL,
   handicap_value INTEGER NOT NULL,
   scratch_entries INTEGER NOT NULL,
@@ -109,12 +114,16 @@ CREATE TABLE IF NOT EXISTS owed_payments (
 `);
 
 function hasColumn(table: string, column: string): boolean {
-  const rows = db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  const rows = db.query(`PRAGMA table_info(${table})`).all() as {
+    name: string;
+  }[];
   return rows.some((row) => row.name === column);
 }
 
 if (!hasColumn("sessions", "is_completed")) {
-  db.exec(`ALTER TABLE sessions ADD COLUMN is_completed INTEGER NOT NULL DEFAULT 0`);
+  db.exec(
+    `ALTER TABLE sessions ADD COLUMN is_completed INTEGER NOT NULL DEFAULT 0`,
+  );
 }
 
 if (!hasColumn("sessions", "completed_at")) {
@@ -126,19 +135,31 @@ if (!hasColumn("sessions", "brackets_printed_at")) {
 }
 
 if (!hasColumn("bowlers", "pay_later")) {
-  db.exec(`ALTER TABLE bowlers ADD COLUMN pay_later INTEGER NOT NULL DEFAULT 0`);
+  db.exec(
+    `ALTER TABLE bowlers ADD COLUMN pay_later INTEGER NOT NULL DEFAULT 0`,
+  );
 }
 
 if (!hasColumn("bowlers", "all_brackets")) {
-  db.exec(`ALTER TABLE bowlers ADD COLUMN all_brackets INTEGER NOT NULL DEFAULT 0`);
+  db.exec(
+    `ALTER TABLE bowlers ADD COLUMN all_brackets INTEGER NOT NULL DEFAULT 0`,
+  );
 }
 
 if (!hasColumn("bowlers", "all_brackets_count")) {
-  db.exec(`ALTER TABLE bowlers ADD COLUMN all_brackets_count INTEGER NOT NULL DEFAULT 0`);
+  db.exec(
+    `ALTER TABLE bowlers ADD COLUMN all_brackets_count INTEGER NOT NULL DEFAULT 0`,
+  );
 }
 
 if (!hasColumn("bowlers", "all_brackets_mode")) {
-  db.exec(`ALTER TABLE bowlers ADD COLUMN all_brackets_mode TEXT NOT NULL DEFAULT 'off'`);
+  db.exec(
+    `ALTER TABLE bowlers ADD COLUMN all_brackets_mode TEXT NOT NULL DEFAULT 'off'`,
+  );
+}
+
+if (!hasColumn("bowlers", "lane_number")) {
+  db.exec(`ALTER TABLE bowlers ADD COLUMN lane_number INTEGER`);
 }
 
 const seedDemoSession = db.transaction(() => {
@@ -157,7 +178,7 @@ const seedDemoSession = db.transaction(() => {
   const session = db
     .query(
       `INSERT INTO sessions (name, entry_fee_cents, handicap_percent, handicap_base, payout_first_cents, payout_second_cents)
-       VALUES (?, ?, ?, ?, ?, ?) RETURNING id, handicap_percent, handicap_base`
+       VALUES (?, ?, ?, ?, ?, ?) RETURNING id, handicap_percent, handicap_base`,
     )
     .get("Demo Session - Thursday Night", 500, 80, 220, 2_500, 1_000) as {
     id: number;
@@ -166,24 +187,53 @@ const seedDemoSession = db.transaction(() => {
   };
 
   const addBowler = db.query(
-    `INSERT INTO bowlers (session_id, name, average, handicap_value, scratch_entries, handicap_entries)
-     VALUES (?, ?, ?, ?, ?, ?)`
+    `INSERT INTO bowlers (session_id, name, lane_number, average, handicap_value, scratch_entries, handicap_entries)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
 
-  const bowlers: Array<[string, number, number, number]> = [
-    ["Alex Carter", 212, 2, 2],
-    ["Brooke Diaz", 198, 2, 2],
-    ["Chris Foster", 205, 2, 2],
-    ["Dana Hayes", 187, 2, 1],
-    ["Evan Reed", 194, 2, 1],
-    ["Frankie Shaw", 176, 2, 1],
-    ["Gabe Turner", 201, 2, 1],
-    ["Harper Wells", 189, 2, 1],
+  const bowlers: Array<[string, number, number, number, number]> = [
+    ["BRANDON", 1, 212, 0, 1],
+    ["BROCK", 1, 198, 0, 3],
+    ["BRYAN VOLLMER", 2, 205, 0, 3],
+    ["DREGGORS", 2, 187, 0, 3],
+    ["EMIL", 3, 194, 0, 1],
+    ["GALLER", 3, 176, 0, 14],
+    ["JUSTIN JEWELL", 4, 201, 0, 14],
+    ["JUSTIN WREN", 4, 189, 0, 10],
+    ["LANCE G", 4, 189, 0, 1],
+    ["LARRY KASSNER", 4, 189, 0, 2],
+    ["LUIS DELEON", 4, 189, 0, 14],
+    ["MATT CABANSKI", 4, 189, 0, 14],
+    ["NELSON", 4, 189, 0, 6],
+    ["RANDY RANGEL", 4, 189, 0, 3],
+    ["RICH A SR", 4, 189, 0, 2],
+    ["RYAN BODY", 4, 189, 0, 1],
+    ["S CORBETT", 4, 189, 0, 14],
+    ["TJ D", 4, 189, 0, 1],
+    ["TONY HOUSTON", 4, 189, 0, 5],
   ];
 
-  for (const [name, average, scratchEntries, handicapEntries] of bowlers) {
-    const handicapValue = calculateHandicap(average, session.handicap_percent, session.handicap_base);
-    addBowler.run(session.id, name, average, handicapValue, scratchEntries, handicapEntries);
+  for (const [
+    name,
+    laneNumber,
+    average,
+    scratchEntries,
+    handicapEntries,
+  ] of bowlers) {
+    const handicapValue = calculateHandicap(
+      average,
+      session.handicap_percent,
+      session.handicap_base,
+    );
+    addBowler.run(
+      session.id,
+      name,
+      laneNumber,
+      average,
+      handicapValue,
+      scratchEntries,
+      handicapEntries,
+    );
   }
 });
 

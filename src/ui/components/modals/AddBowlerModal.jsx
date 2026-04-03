@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 const ALL_BRACKETS_MODES = [
   { key: "off", label: "Off" },
   { key: "both", label: "All (Both)" },
@@ -6,6 +8,23 @@ const ALL_BRACKETS_MODES = [
 ];
 
 export function AddBowlerModal({ open, sessionCompleted, formState, setFormState, onClose, onSubmit }) {
+  const nameInputRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    requestAnimationFrame(() => {
+      nameInputRef.current?.focus();
+    });
+  }, [open]);
+
+  async function handleSubmit(e) {
+    const didAddBowler = await onSubmit(e);
+    if (!didAddBowler) return;
+    requestAnimationFrame(() => {
+      nameInputRef.current?.focus();
+    });
+  }
+
   return (
     <div
       className={`modal ${open ? "" : "is-hidden"}`}
@@ -19,14 +38,31 @@ export function AddBowlerModal({ open, sessionCompleted, formState, setFormState
       <div className="modal-card add-bowler-modal-card" role="dialog" aria-modal="true" aria-labelledby="add-bowler-title">
         <h2 id="add-bowler-title">Add Bowler</h2>
         <p>Enter bowler details. Bracket entries can be set now or edited later.</p>
-        <form className="grid compact-grid" onSubmit={onSubmit}>
+        <form className="grid compact-grid" onSubmit={handleSubmit}>
           <label>
             Name
             <input
+              ref={nameInputRef}
               required
               name="name"
               value={formState.name}
               onChange={(e) => setFormState((p) => ({ ...p, name: e.target.value }))}
+            />
+          </label>
+          <label>
+            Lane #
+            <input
+              name="laneNumber"
+              type="number"
+              min="1"
+              step="1"
+              value={formState.laneNumber ?? ""}
+              onChange={(e) =>
+                setFormState((p) => ({
+                  ...p,
+                  laneNumber: e.target.value,
+                }))
+              }
             />
           </label>
           <label>

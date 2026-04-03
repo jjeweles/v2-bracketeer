@@ -6,8 +6,10 @@ use std::net::TcpListener;
 use std::process::{Child, Command};
 #[cfg(not(debug_assertions))]
 use std::sync::Mutex;
+use tauri::Emitter;
 #[cfg(not(debug_assertions))]
 use tauri::Manager;
+use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 
 #[cfg(not(debug_assertions))]
 struct BackendState {
@@ -78,7 +80,8 @@ fn main() {
     let mut command = Command::new(&backend_path);
     command
       .env("BRACKETEER_DB_PATH", db_path)
-      .env("BRACKETEER_PORT", port.to_string());
+      .env("BRACKETEER_PORT", port.to_string())
+      .env("BRACKETEER_APP_VERSION", env!("CARGO_PKG_VERSION"));
 
     #[cfg(target_os = "windows")]
     {
@@ -103,6 +106,15 @@ fn main() {
       if let Some(state) = start_backend(_app) {
         _app.manage(state);
       }
+
+      let check_updates = MenuItemBuilder::with_id("check_updates", "Check for Updates").build(_app)?;
+      let file_menu = SubmenuBuilder::new(_app, "File")
+        .item(&check_updates)
+        .separator()
+        .quit()
+        .build()?;
+      let menu = MenuBuilder::new(_app).item(&file_menu).build()?;
+      _app.set_menu(menu)?;
       Ok(())
     });
 
@@ -111,6 +123,12 @@ fn main() {
     .expect("error while running tauri application");
 
   app.run(|_app_handle, _event| {
+    if let tauri::RunEvent::MenuEvent(menu_event) = &_event {
+      if menu_event.id().as_ref() == "check_updates" {
+        let _ = _app_handle.emit("menu-check-updates", ());
+      }
+    }
+
     #[cfg(not(debug_assertions))]
     if matches!(_event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
       if let Some(state) = _app_handle.try_state::<BackendState>() {

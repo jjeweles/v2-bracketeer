@@ -3,6 +3,7 @@ import { api } from "../lib/api-client";
 
 const BOWLER_DEFAULTS = {
   name: "",
+  laneNumber: "",
   average: "",
   scratchEntries: 0,
   handicapEntries: 0,
@@ -19,11 +20,11 @@ export function useBowlerActions({
   confirmState,
   loadSessions,
   loadSnapshot,
-  setAddBowlerModalOpen,
   setBowlerFormDefaults,
   setConfirmState,
   setEditingCell,
   setNameDrafts,
+  setLaneNumberDrafts,
   setAverageDrafts,
   setScratchEntriesDrafts,
   setHandicapEntriesDrafts,
@@ -35,15 +36,19 @@ export function useBowlerActions({
       e.preventDefault();
       if (!activeSessionId) {
         setStatus("Select session first");
-        return;
+        return false;
       }
       if (sessionCompleted) {
         setStatus("Session is completed and read-only");
-        return;
+        return false;
       }
 
       const payload = {
         name: bowlerFormDefaults.name,
+        laneNumber:
+          bowlerFormDefaults.laneNumber == null
+            ? null
+            : String(bowlerFormDefaults.laneNumber).trim(),
         average: Number(bowlerFormDefaults.average),
         scratchEntries: Number(bowlerFormDefaults.scratchEntries),
         handicapEntries: Number(bowlerFormDefaults.handicapEntries),
@@ -58,10 +63,11 @@ export function useBowlerActions({
         });
         await loadSnapshot(activeSessionId);
         setBowlerFormDefaults(BOWLER_DEFAULTS);
-        setAddBowlerModalOpen(false);
         setStatus("Bowler added");
+        return true;
       } catch (err) {
         setStatus(err.message);
+        return false;
       }
     },
     [
@@ -69,7 +75,6 @@ export function useBowlerActions({
       bowlerFormDefaults,
       loadSnapshot,
       sessionCompleted,
-      setAddBowlerModalOpen,
       setBowlerFormDefaults,
       setStatus,
     ],
@@ -126,6 +131,9 @@ export function useBowlerActions({
       if (field === "average") {
         setAverageDrafts((prev) => ({ ...prev, [bowlerId]: String(sourceBowler.average) }));
       }
+      if (field === "lane_number") {
+        setLaneNumberDrafts((prev) => ({ ...prev, [bowlerId]: sourceBowler.lane_number == null ? "" : String(sourceBowler.lane_number) }));
+      }
       if (field === "scratch_entries") {
         setScratchEntriesDrafts((prev) => ({ ...prev, [bowlerId]: String(sourceBowler.scratch_entries) }));
       }
@@ -134,7 +142,7 @@ export function useBowlerActions({
       }
       setEditingCell(null);
     },
-    [setAverageDrafts, setEditingCell, setHandicapEntriesDrafts, setNameDrafts, setScratchEntriesDrafts],
+    [setAverageDrafts, setEditingCell, setHandicapEntriesDrafts, setLaneNumberDrafts, setNameDrafts, setScratchEntriesDrafts],
   );
 
   const onClickDelete = useCallback(
