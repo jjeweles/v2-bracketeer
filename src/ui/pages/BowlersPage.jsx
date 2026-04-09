@@ -6,6 +6,7 @@ export function BowlersPage({
   onOpenAddBowler,
   onOpenEntrants,
   entriesNeededSummary,
+  projectedBracketCounts,
   bowlerSearchQuery,
   setBowlerSearchQuery,
   onImportBowlersPdf,
@@ -58,22 +59,32 @@ export function BowlersPage({
             value={bowlerSearchQuery}
             onChange={(e) => setBowlerSearchQuery(e.target.value)}
           />
-          <button type="button" className="secondary bowlers-entrants-btn" onClick={onOpenEntrants}>
+          <button
+            type="button"
+            className="secondary bowlers-entrants-btn"
+            onClick={onOpenEntrants}
+          >
             Entrants
           </button>
         </div>
 
         <div className="bowlers-entry-needs">
-          <span className="pill">
-            {entriesNeededSummary?.scratch == null
-              ? "Scratch: need at least 8 bowlers"
-              : `Scratch Needed: ${entriesNeededSummary.scratch}`}
-          </span>
-          <span className="pill">
-            {entriesNeededSummary?.handicap == null
-              ? "Hdcp: need at least 8 bowlers"
-              : `Hdcp Needed: ${entriesNeededSummary.handicap}`}
-          </span>
+          <div className="bowlers-entry-needs-group bowlers-entry-needs-needed">
+            <span className="pill">
+              {entriesNeededSummary?.scratch == null
+                ? "Scratch: need at least 8 bowlers"
+                : `Scratch Needed: ${entriesNeededSummary.scratch}`}
+            </span>
+            <span className="pill">
+              {entriesNeededSummary?.handicap == null
+                ? "Hdcp: need at least 8 bowlers"
+                : `Hdcp Needed: ${entriesNeededSummary.handicap}`}
+            </span>
+          </div>
+          <div className="bowlers-entry-needs-group">
+            <span className="pill">{`Current Full Scratch: ${Number(projectedBracketCounts?.scratch ?? 0)}`}</span>
+            <span className="pill">{`Current Full Hdcp: ${Number(projectedBracketCounts?.handicap ?? 0)}`}</span>
+          </div>
         </div>
 
         <div className="file-label">
@@ -140,6 +151,7 @@ export function BowlersPage({
                     togglePayLater={togglePayLater}
                     owedByBowler={owedByBowler}
                     onClickDelete={onClickDelete}
+                    projectedBracketCounts={projectedBracketCounts}
                   />
                 ))}
               </tbody>

@@ -22,7 +22,18 @@ export function BowlerRow({
   togglePayLater,
   owedByBowler,
   onClickDelete,
+  projectedBracketCounts,
 }) {
+  const allMode = bowler.all_brackets_mode || "off";
+  const scratchDynamic = allMode === "both" || allMode === "scratch";
+  const handicapDynamic = allMode === "both" || allMode === "handicap";
+  const scratchDisplayValue = scratchDynamic
+    ? projectedBracketCounts?.scratch ?? 0
+    : bowler.scratch_entries;
+  const handicapDisplayValue = handicapDynamic
+    ? projectedBracketCounts?.handicap ?? 0
+    : bowler.handicap_entries;
+
   const isEditingName =
     editingCell?.bowlerId === bowler.id && editingCell?.field === "name";
   const isEditingAverage =
@@ -130,10 +141,10 @@ export function BowlerRow({
 
       <td>{bowler.handicap_value}</td>
 
-      <td>
+      <td className={scratchDynamic ? "dynamic-entry-cell" : ""}>
         <EditableCellButton
           isEditing={isEditingScratch}
-          sessionCompleted={sessionCompleted}
+          sessionCompleted={sessionCompleted || scratchDynamic}
           draftValue={scratchEntriesDrafts[bowler.id] ?? ""}
           onDraftChange={(next) =>
             setScratchEntriesDrafts((prev) => ({ ...prev, [bowler.id]: next }))
@@ -147,16 +158,16 @@ export function BowlerRow({
             }));
             startEdit("scratch_entries");
           }}
-          displayValue={bowler.scratch_entries}
+          displayValue={scratchDisplayValue}
           inputType="number"
           inputMin="0"
         />
       </td>
 
-      <td>
+      <td className={handicapDynamic ? "dynamic-entry-cell" : ""}>
         <EditableCellButton
           isEditing={isEditingHandicap}
-          sessionCompleted={sessionCompleted}
+          sessionCompleted={sessionCompleted || handicapDynamic}
           draftValue={handicapEntriesDrafts[bowler.id] ?? ""}
           onDraftChange={(next) =>
             setHandicapEntriesDrafts((prev) => ({
@@ -173,7 +184,7 @@ export function BowlerRow({
             }));
             startEdit("handicap_entries");
           }}
-          displayValue={bowler.handicap_entries}
+          displayValue={handicapDisplayValue}
           inputType="number"
           inputMin="0"
         />

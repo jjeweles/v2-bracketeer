@@ -126,7 +126,8 @@ export function useBracketActions({
     }
 
     const styles = getDocumentStylesHtml(document);
-    const cards = Array.from(document.querySelectorAll(".bracket-card"));
+    const activeBracketPage = document.querySelector(".page.is-active");
+    const cards = Array.from(activeBracketPage?.querySelectorAll(".bracket-card") ?? []);
     if (cards.length === 0) {
       setStatus("No brackets to print");
       return;

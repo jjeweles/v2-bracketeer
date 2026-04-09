@@ -470,6 +470,32 @@ h2 {
   word-break: break-word;
 }
 
+.themed-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) var(--soft-bg);
+}
+
+.themed-scrollbar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.themed-scrollbar::-webkit-scrollbar-track {
+  background: var(--soft-bg);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.themed-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  border: 2px solid var(--soft-bg);
+  border-radius: 999px;
+}
+
+.themed-scrollbar::-webkit-scrollbar-thumb:hover {
+  filter: brightness(1.06);
+}
+
 .bowler-search-input {
   width: min(420px, 100%);
 }
@@ -489,6 +515,19 @@ h2 {
   gap: 0.5rem;
   flex-wrap: wrap;
   margin: 0 0 0.7rem;
+}
+
+.bowlers-entry-needs-group {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.bowlers-entry-needs-needed {
+  margin-right: 0.95rem;
+  padding-right: 0.95rem;
+  border-right: 1px solid var(--line);
 }
 
 label {
@@ -878,6 +917,15 @@ thead th {
   align-items: center;
 }
 
+.dynamic-entry-cell {
+  background: rgba(77, 184, 142, 0.1);
+}
+
+.dynamic-entry-cell .avg-display {
+  border-color: rgba(77, 184, 142, 0.26);
+  background: rgba(77, 184, 142, 0.08);
+}
+
 .mode-buttons {
   display: flex;
   flex-wrap: wrap;
@@ -903,8 +951,48 @@ thead th {
   width: min(560px, 100%);
 }
 
+.owed-modal-card {
+  max-height: min(84vh, 820px);
+  display: flex;
+  flex-direction: column;
+}
+
+.owed-modal-card .refund-list {
+  overflow: auto;
+  max-height: calc(min(84vh, 820px) - 170px);
+  padding-right: 0.1rem;
+}
+
 .add-bowler-modal-card {
   width: min(700px, 100%);
+}
+
+.add-bowler-row {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.add-bowler-row-2 {
+  grid-template-columns: minmax(0, 1fr) 150px;
+}
+
+.add-bowler-row-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.add-bowler-controls-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.add-bowler-mode-group {
+  align-items: flex-start;
+}
+
+.add-bowler-paylater-btn {
+  white-space: nowrap;
+  padding: 0.44rem 0.7rem;
 }
 
 .entrants-modal-card {
@@ -1011,6 +1099,10 @@ thead th {
 }
 
 .entrants-print-fallback {
+  display: none;
+}
+
+.payout-print-fallback {
   display: none;
 }
 
@@ -1129,6 +1221,16 @@ thead th {
   .card-grid {
     grid-template-columns: 1fr;
   }
+
+  .add-bowler-row-2,
+  .add-bowler-row-3,
+  .add-bowler-controls-row {
+    grid-template-columns: 1fr;
+  }
+
+  .add-bowler-paylater-btn {
+    width: 100%;
+  }
 }
 
 @media print {
@@ -1201,6 +1303,10 @@ thead th {
     grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
     grid-template-rows: repeat(2, minmax(0, 1fr)) !important;
     gap: 6mm !important;
+    width: 100% !important;
+    min-height: calc(100vh - 2mm) !important;
+    height: calc(100vh - 2mm) !important;
+    align-items: stretch !important;
     break-after: page !important;
     page-break-after: always !important;
   }
@@ -1215,8 +1321,15 @@ thead th {
     page-break-after: auto !important;
     break-inside: avoid !important;
     page-break-inside: avoid !important;
+    display: grid !important;
+    grid-template-rows: auto 1fr !important;
+    align-content: stretch !important;
     margin: 0 !important;
     padding: 2.5mm !important;
+  }
+
+  .print-brackets-sheet.print-grid-6 .print-brackets-page .bracket-card .visual-bracket-wrap {
+    height: 100% !important;
   }
 
   .bracket-card {
@@ -1310,6 +1423,50 @@ thead th {
   }
 
   body.is-printing-entrants .entrants-print-sheet thead th {
+    background: #f1f1f1;
+  }
+
+  body.is-printing-payout-summary .shell {
+    display: none !important;
+  }
+
+  body.is-printing-payout-summary .payout-print-fallback {
+    display: block !important;
+    color: #111111 !important;
+    font-family: Arial, sans-serif !important;
+  }
+
+  body.is-printing-payout-summary .payout-print-sheet h1 {
+    margin: 0 0 6px;
+    font-size: 24px;
+  }
+
+  body.is-printing-payout-summary .payout-print-sheet p {
+    margin: 0 0 12px;
+    font-size: 14px;
+    color: #444;
+  }
+
+  body.is-printing-payout-summary .payout-print-sheet h2 {
+    margin: 14px 0 8px;
+    font-size: 18px;
+  }
+
+  body.is-printing-payout-summary .payout-print-sheet table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 8px;
+  }
+
+  body.is-printing-payout-summary .payout-print-sheet th,
+  body.is-printing-payout-summary .payout-print-sheet td {
+    border: 1px solid #999;
+    padding: 8px;
+    text-align: left;
+    font-size: 13px;
+  }
+
+  body.is-printing-payout-summary .payout-print-sheet thead th {
     background: #f1f1f1;
   }
 

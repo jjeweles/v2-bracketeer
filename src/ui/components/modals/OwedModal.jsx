@@ -11,10 +11,10 @@ export function OwedModal({ open, owedTotals, paidOwedMap, sessionCompleted, onT
         }
       }}
     >
-      <div className="modal-card refund-modal-card" role="dialog" aria-modal="true" aria-labelledby="owed-title">
+      <div className="modal-card refund-modal-card owed-modal-card" role="dialog" aria-modal="true" aria-labelledby="owed-title">
         <h2 id="owed-title">Amounts Owed</h2>
         <p>Net owed is bracket cost minus payouts won. Mark paid when payment is received.</p>
-        <div className="refund-list">
+        <div className="refund-list themed-scrollbar">
           {owedTotals.length === 0 ? (
             <div className="refund-empty">No pay-later bowlers in this session.</div>
           ) : (

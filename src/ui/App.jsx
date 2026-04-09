@@ -49,6 +49,60 @@ export function App() {
     return null;
   }
 
+  function maxBracketCountFromCounts(rawCounts) {
+    const counts = rawCounts.map((n) => Math.max(0, Math.floor(Number(n) || 0))).filter((n) => n > 0);
+    if (counts.length < 8) return 0;
+    const totalEntries = counts.reduce((acc, n) => acc + n, 0);
+    if (totalEntries < 8) return 0;
+
+    let best = 0;
+    const cap = Math.floor(totalEntries / 8);
+    for (let r = 1; r <= cap; r += 1) {
+      const capacity = counts.reduce((acc, n) => acc + Math.min(n, r), 0);
+      if (capacity >= r * 8) {
+        best = r;
+      }
+    }
+    return best;
+  }
+
+  function projectedBracketCountForKind(bowlers, kind) {
+    const applies = (mode) => mode === "both" || mode === kind;
+    const forcedAll = bowlers.filter((bowler) => applies(bowler.all_brackets_mode));
+    const counts = [];
+
+    if (forcedAll.length > 0 && forcedAll.length < 8) {
+      const slotsPerBracket = 8 - forcedAll.length;
+      const nonAllTotalEntries = bowlers
+        .filter((bowler) => !applies(bowler.all_brackets_mode))
+        .reduce((acc, bowler) => {
+          const configuredCount = kind === "scratch" ? bowler.scratch_entries : bowler.handicap_entries;
+          return acc + Math.max(0, Number(configuredCount) || 0);
+        }, 0);
+      const projectedAllCount = Math.max(0, Math.floor(nonAllTotalEntries / slotsPerBracket));
+
+      for (const bowler of bowlers) {
+        if (applies(bowler.all_brackets_mode)) {
+          counts.push(projectedAllCount);
+        } else {
+          const configuredCount = kind === "scratch" ? bowler.scratch_entries : bowler.handicap_entries;
+          counts.push(Math.max(0, Number(configuredCount) || 0));
+        }
+      }
+    } else {
+      for (const bowler of bowlers) {
+        const configuredCount = kind === "scratch" ? bowler.scratch_entries : bowler.handicap_entries;
+        if (applies(bowler.all_brackets_mode)) {
+          counts.push(1);
+        } else {
+          counts.push(Math.max(0, Number(configuredCount) || 0));
+        }
+      }
+    }
+
+    return maxBracketCountFromCounts(counts);
+  }
+
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [snapshot, setSnapshot] = useState(null);
@@ -143,22 +197,69 @@ export function App() {
     return snapshot.requiredScorersByGame?.[`game${gameNumber}`] ?? [];
   }, [snapshot, gameNumber]);
 
+  const projectedBracketCounts = useMemo(() => {
+    const bowlers = snapshot?.bowlers ?? [];
+    return {
+      scratch: projectedBracketCountForKind(bowlers, "scratch"),
+      handicap: projectedBracketCountForKind(bowlers, "handicap"),
+    };
+  }, [snapshot]);
+
+  const effectiveEntriesByBowler = useMemo(() => {
+    const bowlers = snapshot?.bowlers ?? [];
+    const applies = (mode, kind) => mode === "both" || mode === kind;
+    const byId = new Map();
+
+    for (const bowler of bowlers) {
+      const mode = bowler.all_brackets_mode || "off";
+      const scratchEntries = applies(mode, "scratch")
+        ? Number(projectedBracketCounts?.scratch ?? 0)
+        : Math.max(0, Number(bowler.scratch_entries ?? 0));
+      const handicapEntries = applies(mode, "handicap")
+        ? Number(projectedBracketCounts?.handicap ?? 0)
+        : Math.max(0, Number(bowler.handicap_entries ?? 0));
+
+      byId.set(bowler.id, {
+        scratch: scratchEntries,
+        handicap: handicapEntries,
+      });
+    }
+
+    return byId;
+  }, [snapshot, projectedBracketCounts]);
+
   const entriesNeededSummary = useMemo(() => {
     const bowlers = snapshot?.bowlers ?? [];
     return {
-      scratch: entriesNeededForFullBrackets(bowlers.map((b) => b.scratch_entries)),
-      handicap: entriesNeededForFullBrackets(bowlers.map((b) => b.handicap_entries)),
+      scratch: entriesNeededForFullBrackets(
+        bowlers.map(
+          (b) =>
+            effectiveEntriesByBowler.get(b.id)?.scratch ??
+            Math.max(0, Number(b.scratch_entries ?? 0)),
+        ),
+      ),
+      handicap: entriesNeededForFullBrackets(
+        bowlers.map(
+          (b) =>
+            effectiveEntriesByBowler.get(b.id)?.handicap ??
+            Math.max(0, Number(b.handicap_entries ?? 0)),
+        ),
+      ),
     };
-  }, [snapshot]);
+  }, [snapshot, effectiveEntriesByBowler]);
 
   const entrantsRows = useMemo(() => {
     return sortedBowlers.map((bowler) => ({
       id: bowler.id,
       displayName: bowler.displayName,
-      scratchEntries: Number(bowler.scratch_entries ?? 0),
-      handicapEntries: Number(bowler.handicap_entries ?? 0),
+      scratchEntries:
+        effectiveEntriesByBowler.get(bowler.id)?.scratch ??
+        Number(bowler.scratch_entries ?? 0),
+      handicapEntries:
+        effectiveEntriesByBowler.get(bowler.id)?.handicap ??
+        Number(bowler.handicap_entries ?? 0),
     }));
-  }, [sortedBowlers]);
+  }, [sortedBowlers, effectiveEntriesByBowler]);
 
   const onPrintEntrants = useCallback(() => {
     if (entrantsRows.length === 0) {
@@ -256,6 +357,122 @@ export function App() {
     }
     setStatus("Opening print dialog...");
   }, [entrantsRows, setStatus, snapshot?.session?.entry_fee_cents, snapshot?.session?.name]);
+
+  const onPrintPayoutSummary = useCallback(() => {
+    if (typeof window === "undefined") {
+      setStatus("Printing is unavailable in this environment");
+      return;
+    }
+
+    const payoutRows = snapshot?.payoutTotals ?? [];
+    const remainingOwedRows = (snapshot?.owedTotals ?? []).filter((row) => Number(row.netOwedCents ?? 0) > 0);
+    if (payoutRows.length === 0 && remainingOwedRows.length === 0) {
+      setStatus("No payouts or owed balances to print");
+      return;
+    }
+
+    const sessionName = String(snapshot?.session?.name ?? "Session");
+    const esc = (value) =>
+      String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    const money = (cents) => `$${(Number(cents || 0) / 100).toFixed(2)}`;
+
+    const payoutRowsHtml =
+      payoutRows.length === 0
+        ? `<tr><td colspan="2">No payouts</td></tr>`
+        : payoutRows
+            .map(
+              (row) => `<tr>
+          <td>${esc(row.name)}</td>
+          <td>${money(row.amountCents)}</td>
+        </tr>`,
+            )
+            .join("");
+
+    const owedRowsHtml =
+      remainingOwedRows.length === 0
+        ? `<tr><td colspan="2">No remaining owed balances</td></tr>`
+        : remainingOwedRows
+            .map(
+              (row) => `<tr>
+          <td>${esc(row.name)}</td>
+          <td>${money(row.netOwedCents)}</td>
+        </tr>`,
+            )
+            .join("");
+
+    const bodyHtml = `
+      <main class="payout-print-sheet">
+        <h1>Payout Summary</h1>
+        <p>${esc(sessionName)}</p>
+
+        <h2>Payouts</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Bowler</th>
+              <th>Payout</th>
+            </tr>
+          </thead>
+          <tbody>${payoutRowsHtml}</tbody>
+        </table>
+
+        <h2>Owed (Remaining)</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Bowler</th>
+              <th>Net Owed</th>
+            </tr>
+          </thead>
+          <tbody>${owedRowsHtml}</tbody>
+        </table>
+      </main>
+    `;
+
+    const printed = openAndPrintHtml({
+      title: "Payout Summary",
+      stylesHtml: `${getDocumentStylesHtml(document)}
+      <style>
+        @page { margin: 10mm; }
+        body { margin: 0; color: #111; background: #fff; font-family: Arial, sans-serif; }
+        .payout-print-sheet h1 { margin: 0 0 6px; font-size: 24px; }
+        .payout-print-sheet p { margin: 0 0 12px; font-size: 14px; color: #444; }
+        .payout-print-sheet h2 { margin: 14px 0 8px; font-size: 18px; }
+        .payout-print-sheet table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+        .payout-print-sheet th, .payout-print-sheet td { border: 1px solid #999; padding: 8px; text-align: left; font-size: 13px; }
+        .payout-print-sheet thead th { background: #f1f1f1; }
+      </style>`,
+      bodyHtml,
+    });
+
+    if (!printed) {
+      const containerId = "payout-print-fallback";
+      let container = document.getElementById(containerId);
+      if (!container) {
+        container = document.createElement("div");
+        container.id = containerId;
+        container.className = "payout-print-fallback";
+        document.body.appendChild(container);
+      }
+      container.innerHTML = bodyHtml;
+
+      const cleanup = () => {
+        document.body.classList.remove("is-printing-payout-summary");
+        window.removeEventListener("afterprint", cleanup);
+      };
+
+      document.body.classList.add("is-printing-payout-summary");
+      window.addEventListener("afterprint", cleanup);
+      setStatus("Opening print dialog...");
+      window.print();
+      return;
+    }
+    setStatus("Opening print dialog...");
+  }, [setStatus, snapshot]);
 
   const onCheckUpdates = useCallback(async (opts = {}) => {
     const silent = Boolean(opts.silent);
@@ -504,6 +721,7 @@ export function App() {
             onOpenAddBowler={() => setAddBowlerModalOpen(true)}
             onOpenEntrants={() => setEntrantsModalOpen(true)}
             entriesNeededSummary={entriesNeededSummary}
+            projectedBracketCounts={projectedBracketCounts}
             bowlerSearchQuery={bowlerSearchQuery}
             setBowlerSearchQuery={setBowlerSearchQuery}
             onImportBowlersPdf={onImportBowlersPdf}
@@ -567,6 +785,7 @@ export function App() {
             onOpenRefundModal={() => setRefundModalOpen(true)}
             onOpenOwedModal={() => setOwedModalOpen(true)}
             onTogglePayoutPaid={(bowlerId) => void togglePayoutPaid(bowlerId)}
+            onPrintPayoutSummary={onPrintPayoutSummary}
           />
 
           <SettingsPage

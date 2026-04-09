@@ -10,6 +10,7 @@ export function PayoutsPage({
   onOpenRefundModal,
   onOpenOwedModal,
   onTogglePayoutPaid,
+  onPrintPayoutSummary,
 }) {
   return (
     <section className={`page ${active ? "is-active" : ""}`}>
@@ -33,6 +34,14 @@ export function PayoutsPage({
               View Owed
             </button>
           )}
+          <button
+            type="button"
+            className="button secondary"
+            onClick={onPrintPayoutSummary}
+            disabled={payouts.length === 0 && owedTotals.every((row) => Number(row.netOwedCents ?? 0) <= 0)}
+          >
+            Print Payout Summary
+          </button>
         </div>
         <div className="panel">
           {payouts.length === 0

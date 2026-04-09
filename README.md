@@ -40,17 +40,27 @@ Bracket/session management app for bowling side brackets.
 - Alphabetical display by `Last, First`.
 - Inline click-to-edit for:
   - name
+  - lane number
   - average
   - scratch entries
   - handicap entries
 - Delete with confirmation modal.
 - Search/filter for large lists.
 - Optional pay-later tracking per bowler.
+- Fast add workflow:
+  - Add Bowler modal stays open after save for batch entry.
+  - Name field autofocuses on open and after each successful save.
 - `All Brackets` modes:
   - `Off`
   - `All (Both)`
   - `All-Handicap`
   - `All-Scratch`
+- Entrants report:
+  - Viewable in-app from Bowlers page.
+  - Printable entrants sheet with per-type entry totals.
+- Live bowlers metrics:
+  - `Scratch Needed` / `Hdcp Needed` to complete full bracket groupings.
+  - `Scratch Can Make` / `Hdcp Can Make` for current entry capacity.
 
 ### PDF Import
 
@@ -70,6 +80,7 @@ Bracket/session management app for bowling side brackets.
   - Round 2: winners advance
   - Round 3: final
 - Scores are entered once per bowler per game and reused across their bracket entries.
+- Score entry range is constrained to `0-300`.
 - Game tabs are gated:
   - Game 2 locked until Game 1 saved
   - Game 3 locked until Game 2 saved
@@ -80,6 +91,10 @@ Bracket/session management app for bowling side brackets.
 - `All-Scratch` = enter every possible scratch bracket.
 - `All-Handicap` = enter every possible handicap bracket.
 - No manual count is required in UI for ALL mode.
+- Projected ALL-mode counts are applied consistently across:
+  - Bowler table display
+  - Entrants report
+  - `Needed`/`Can Make` calculations
 
 ### Refunds, Payouts, Owed
 
@@ -87,12 +102,26 @@ Bracket/session management app for bowling side brackets.
 - Payouts page contains:
   - `View Refunds` modal
   - `View Owed` modal
-  - payout list with mark-paid toggles
+  - printable payout summary
+- payout list with mark-paid toggles
 - Refund/owed/payout rows can be marked settled/paid.
 - KPI cards show remaining outstanding amounts.
 - For pay-later bowlers:
   - owed = bracket costs (based on actual generated entries)
   - payout summary amount is net (`gross winnings - owed`)
+- Printable payout summary includes an owed section only for bowlers with remaining owed balances.
+
+### Printing
+
+- Bracket print layout is optimized for 6 brackets per page in landscape-style output.
+- Alive list print includes the selected game number in the header.
+- Bracket print pages omit financial/session-summary header details.
+
+### Updates
+
+- In-app update check is available in Settings.
+- Native app menu includes `File -> Check for updates`.
+- Release download actions select the OS-appropriate artifact when available.
 
 ### Session Completion
 
@@ -173,4 +202,4 @@ bun run ui:build
 bun run desktop:build
 ```
 
-- Bundles output under `/v2-bracketeer/src-tauri/target/release/bundle/`
+- Bundles output under `src-tauri/target/release/bundle/`

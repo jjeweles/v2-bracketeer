@@ -48,9 +48,11 @@ export function useScoreActions({
       scratchScore: Number(scoreDrafts[s.bowlerId]),
       name: s.name,
     }));
-    const invalid = parsed.find((row) => !Number.isFinite(row.scratchScore) || row.scratchScore < 0);
+    const invalid = parsed.find(
+      (row) => !Number.isFinite(row.scratchScore) || row.scratchScore < 0 || row.scratchScore > 300,
+    );
     if (invalid) {
-      setStatus(`Enter a valid score for ${invalid.name}`);
+      setStatus(`Enter a valid score (0-300) for ${invalid.name}`);
       return;
     }
 

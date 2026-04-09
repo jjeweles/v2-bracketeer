@@ -84,6 +84,7 @@ export function ScoresPage({
                         <input
                           type="number"
                           min="0"
+                          max="300"
                           value={scoreDrafts[s.bowlerId] ?? ""}
                           onChange={(e) => onScoreChange(s.bowlerId, e.target.value)}
                         />

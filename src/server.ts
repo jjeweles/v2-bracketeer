@@ -744,6 +744,17 @@ Bun.serve({
             }))
           : [];
 
+        const invalidScore = scores.find(
+          (s) =>
+            !Number.isFinite(s.bowlerId) ||
+            !Number.isFinite(s.scratchScore) ||
+            s.scratchScore < 0 ||
+            s.scratchScore > 300,
+        );
+        if (invalidScore) {
+          return badRequest("Scores must be between 0 and 300");
+        }
+
         const submittedIds = new Set(scores.map((s) => s.bowlerId));
         if (submittedIds.size !== requiredIds.size || [...requiredIds].some((id) => !submittedIds.has(id))) {
           return badRequest("Scores must be provided for all active bowlers still alive for this game");

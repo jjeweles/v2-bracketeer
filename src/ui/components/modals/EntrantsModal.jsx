@@ -18,7 +18,7 @@ export function EntrantsModal({ open, rows, entryFeeCents, onClose, onPrint }) {
       <div className="modal-card entrants-modal-card" role="dialog" aria-modal="true" aria-labelledby="entrants-title">
         <h2 id="entrants-title">Entrants</h2>
         <p>View and print each bowler's scratch and handicap entries with bracket amounts.</p>
-        <div className="panel entrants-table-wrap">
+        <div className="panel entrants-table-wrap themed-scrollbar">
           {rows.length === 0 ? (
             <div className="refund-empty">No bowlers entered yet.</div>
           ) : (
